@@ -5,6 +5,7 @@ import com.cobblemon.mod.common.client.render.drawScaledText
 import com.mojang.blaze3d.systems.RenderSystem
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
+import net.minecraft.client.util.InputUtil
 import net.minecraft.text.Text
 import org.lwjgl.glfw.GLFW
 import java.util.UUID
@@ -20,7 +21,9 @@ object BattleInfoPanel {
         private set
 
     // Input tracking
-    private var wasKeyPressed: Boolean = false
+    private var wasToggleKeyPressed: Boolean = false
+    private var wasIncreaseFontKeyPressed: Boolean = false
+    private var wasDecreaseFontKeyPressed: Boolean = false
     private var wasMousePressed: Boolean = false
 
     // Dragging state (for moving the panel)
@@ -103,9 +106,6 @@ object BattleInfoPanel {
     // Line height scales with font
     private var lineHeight: Int = BASE_LINE_HEIGHT
 
-    // Toggle key
-    private const val TOGGLE_KEY = GLFW.GLFW_KEY_V
-
     // Cached panel bounds for input detection
     private var panelBoundsX = 0
     private var panelBoundsY = 0
@@ -117,12 +117,16 @@ object BattleInfoPanel {
     private var contentHeight = 0
     private var visibleContentHeight = 0
 
+    // Scissor bounds for manual clipping (drawScaledText doesn't respect GL scissor)
+    private var scissorMinY = 0
+    private var scissorMaxY = 0
+
     // Hover state for visual feedback
     private var hoveredZone: ResizeZone = ResizeZone.NONE
     private var isOverScrollbar = false
 
     // Track previously active Pokemon to detect switches and clear their stats
-    private var previouslyActiveUUIDs: Set<java.util.UUID> = emptySet()
+    private var previouslyActiveUUIDs: Set<UUID> = emptySet()
 
     fun clearBattleState() {
         previouslyActiveUUIDs = emptySet()
@@ -198,9 +202,27 @@ object BattleInfoPanel {
     private fun handleInput(mc: MinecraftClient) {
         val handle = mc.window.handle
 
-        val isKeyDown = GLFW.glfwGetKey(handle, TOGGLE_KEY) == GLFW.GLFW_PRESS
-        if (isKeyDown && !wasKeyPressed) toggle()
-        wasKeyPressed = isKeyDown
+        // Poll keybinds directly with GLFW (Minecraft's keybinding system doesn't work during Cobblemon battle overlay)
+        val toggleKey = InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.togglePanelKey.boundKeyTranslationKey)
+        val isToggleDown = GLFW.glfwGetKey(handle, toggleKey.code) == GLFW.GLFW_PRESS
+        if (isToggleDown && !wasToggleKeyPressed) toggle()
+        wasToggleKeyPressed = isToggleDown
+
+        val increaseKey = InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.increaseFontKey.boundKeyTranslationKey)
+        val isIncreaseDown = GLFW.glfwGetKey(handle, increaseKey.code) == GLFW.GLFW_PRESS
+        if (isIncreaseDown && !wasIncreaseFontKeyPressed) {
+            PanelConfig.adjustFontScale(PanelConfig.FONT_SCALE_STEP)
+            PanelConfig.save()
+        }
+        wasIncreaseFontKeyPressed = isIncreaseDown
+
+        val decreaseKey = InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.decreaseFontKey.boundKeyTranslationKey)
+        val isDecreaseDown = GLFW.glfwGetKey(handle, decreaseKey.code) == GLFW.GLFW_PRESS
+        if (isDecreaseDown && !wasDecreaseFontKeyPressed) {
+            PanelConfig.adjustFontScale(-PanelConfig.FONT_SCALE_STEP)
+            PanelConfig.save()
+        }
+        wasDecreaseFontKeyPressed = isDecreaseDown
 
         val mouseX = (mc.mouse.x * mc.window.scaledWidth / mc.window.width).toInt()
         val mouseY = (mc.mouse.y * mc.window.scaledHeight / mc.window.height).toInt()
@@ -573,21 +595,17 @@ object BattleInfoPanel {
         y: Int,
         width: Int,
         height: Int,
-        pokemonWithStats: List<Triple<java.util.UUID, String, List<Map.Entry<com.cobblemon.mod.common.api.pokemon.stats.Stat, Int>>>>
+        pokemonWithStats: List<Triple<UUID, String, List<Map.Entry<com.cobblemon.mod.common.api.pokemon.stats.Stat, Int>>>>
     ) {
         drawRoundedRect(context, x, y, width, height, PANEL_BG, BORDER_COLOR)
         renderHeader(context, x, y, width)
 
-        // Scissor starts just after header with small margin
         val scissorStartY = y + HEADER_HEIGHT + 2
         val contentAreaHeight = height - HEADER_HEIGHT - PADDING / 2
-        val scrollbarSpace = if (contentHeight > visibleContentHeight) SCROLLBAR_WIDTH + 4 else 0
-        val contentWidth = width - scrollbarSpace
 
-        enableScissor(context, x + 1, scissorStartY, contentWidth - 2, contentAreaHeight)
+        enableScissor(context, x + 1, scissorStartY, width - 2, contentAreaHeight)
 
-        // Content starts with a bit more padding for visual spacing
-        var currentY = scissorStartY + 2 - PanelConfig.scrollOffset
+        var currentY = scissorStartY + 2
 
         val hasWeather = BattleStateTracker.weather != null
         val hasTerrain = BattleStateTracker.terrain != null
@@ -609,21 +627,21 @@ object BattleInfoPanel {
             BattleStateTracker.weather?.let { w ->
                 val turns = BattleStateTracker.getWeatherTurnsRemaining() ?: "?"
                 drawText(context, "${w.type.icon} ${w.type.displayName}", (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_FIELD, 0.8f * textScale)
-                drawText(context, turns, (x + contentWidth - PADDING - turns.length * (5 * textScale).toInt()).toFloat(), currentY.toFloat(), TEXT_DIM, 0.75f * textScale)
+                drawText(context, turns, (x + width - PADDING - turns.length * (5 * textScale).toInt()).toFloat(), currentY.toFloat(), TEXT_DIM, 0.75f * textScale)
                 currentY += lineHeight
             }
 
             BattleStateTracker.terrain?.let { t ->
                 val turns = BattleStateTracker.getTerrainTurnsRemaining() ?: "?"
                 drawText(context, "${t.type.icon} ${t.type.displayName}", (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_FIELD, 0.8f * textScale)
-                drawText(context, turns, (x + contentWidth - PADDING - turns.length * (5 * textScale).toInt()).toFloat(), currentY.toFloat(), TEXT_DIM, 0.75f * textScale)
+                drawText(context, turns, (x + width - PADDING - turns.length * (5 * textScale).toInt()).toFloat(), currentY.toFloat(), TEXT_DIM, 0.75f * textScale)
                 currentY += lineHeight
             }
 
             fieldConditions.forEach { (type, _) ->
                 val turns = BattleStateTracker.getFieldConditionTurnsRemaining(type) ?: "?"
                 drawText(context, "${type.icon} ${type.displayName}", (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_FIELD, 0.8f * textScale)
-                drawText(context, turns, (x + contentWidth - PADDING - turns.length * (5 * textScale).toInt()).toFloat(), currentY.toFloat(), TEXT_DIM, 0.75f * textScale)
+                drawText(context, turns, (x + width - PADDING - turns.length * (5 * textScale).toInt()).toFloat(), currentY.toFloat(), TEXT_DIM, 0.75f * textScale)
                 currentY += lineHeight
             }
 
@@ -647,10 +665,6 @@ object BattleInfoPanel {
         }
 
         disableScissor()
-
-        if (contentHeight > visibleContentHeight) {
-            renderScrollbar(context, x + width - SCROLLBAR_WIDTH - 2, scissorStartY, contentAreaHeight)
-        }
     }
 
     private fun renderExpanded(context: DrawContext, x: Int, y: Int, width: Int, height: Int, pokemonWithStats: List<Triple<UUID, String, List<Map.Entry<com.cobblemon.mod.common.api.pokemon.stats.Stat, Int>>>>) {
@@ -759,13 +773,13 @@ object BattleInfoPanel {
             var sy = sectionY
 
             if (!hasAnyStatChanges) {
-                drawText(context, "None active", (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
+                drawTextClipped(context, "None active", (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
                 sy += lineHeight
             } else {
                 for ((_, name, changedStats) in pokemonWithStats) {
                     if (changedStats.isEmpty()) continue
 
-                    drawText(context, name, (x + PADDING).toFloat(), sy.toFloat(), TEXT_WHITE, 0.85f * textScale)
+                    drawTextClipped(context, name, (x + PADDING).toFloat(), sy.toFloat(), TEXT_WHITE, 0.85f * textScale)
                     sy += (lineHeight * 0.95).toInt()
 
                     val sortedStats = changedStats.sortedBy { getStatSortOrder(it.key.identifier.toString()) }
@@ -785,9 +799,9 @@ object BattleInfoPanel {
                             statX = startX
                         }
 
-                        drawText(context, abbr, statX.toFloat(), sy.toFloat(), TEXT_LIGHT, 0.75f * textScale)
+                        drawTextClipped(context, abbr, statX.toFloat(), sy.toFloat(), TEXT_LIGHT, 0.75f * textScale)
                         statX += (abbr.length * charWidth) + 2
-                        drawText(context, arrows, statX.toFloat(), sy.toFloat(), color, 0.75f * textScale)
+                        drawTextClipped(context, arrows, statX.toFloat(), sy.toFloat(), color, 0.75f * textScale)
                         statX += (arrows.length * charWidth) + (8 * textScale).toInt()
                     }
                     sy += (lineHeight * 0.9).toInt()
@@ -804,6 +818,9 @@ object BattleInfoPanel {
     }
 
     private fun enableScissor(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
+        scissorMinY = y
+        scissorMaxY = y + height
+
         val mc = MinecraftClient.getInstance()
         val scale = mc.window.scaleFactor
 
@@ -947,8 +964,9 @@ object BattleInfoPanel {
         if (pokemonWithChanges.isEmpty()) {
             height += lineHeight  // "None active" text
         } else {
-            // Calculate stat heights accurately using same logic as rendering
-            val contentWidth = panelWidth  // Don't subtract scrollbar space for initial calculation
+            // Always assume scrollbar is present for height calculation (worst case)
+            val scrollbarSpace = SCROLLBAR_WIDTH + 4
+            val contentWidth = panelWidth - scrollbarSpace
             val charWidth = (5 * textScale).toInt()
             val startX = PADDING + (8 * textScale).toInt()
             val maxX = contentWidth - PADDING
@@ -988,6 +1006,12 @@ object BattleInfoPanel {
             colour = color,
             shadow = true
         )
+    }
+
+    private fun drawTextClipped(context: DrawContext, text: String, x: Float, y: Float, color: Int, scale: Float) {
+        val textHeight = (8 * scale).toInt()
+        if (y + textHeight < scissorMinY || y > scissorMaxY) return
+        drawText(context, text, x, y, color, scale)
     }
 
     private fun getStatAbbr(identifier: String): String {

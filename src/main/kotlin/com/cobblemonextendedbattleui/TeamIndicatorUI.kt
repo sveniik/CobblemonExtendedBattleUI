@@ -11,10 +11,8 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Displays pokeball indicators for each team's Pokemon, similar to the main Pokemon games.
+ * Displays pokeball indicators for each team's Pokemon.
  * Shows status conditions and KO'd Pokemon at a glance.
- *
- * For opponents, we track Pokemon as they're revealed since the full team isn't synced.
  */
 object TeamIndicatorUI {
 

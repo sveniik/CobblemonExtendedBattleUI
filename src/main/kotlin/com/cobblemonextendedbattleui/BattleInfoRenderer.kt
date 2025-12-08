@@ -3,7 +3,7 @@ package com.cobblemonextendedbattleui
 import net.minecraft.client.gui.DrawContext
 
 /**
- * Renders additional battle information on the battle overlay.
+ * Renders battle information overlays.
  */
 object BattleInfoRenderer {
 

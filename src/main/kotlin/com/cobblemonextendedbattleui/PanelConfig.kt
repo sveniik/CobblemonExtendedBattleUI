@@ -8,7 +8,6 @@ import java.io.File
 
 /**
  * Persistent configuration for the battle info panel.
- * Stores position, dimensions, and other user preferences.
  */
 object PanelConfig {
     private val gson: Gson = GsonBuilder().setPrettyPrinting().create()

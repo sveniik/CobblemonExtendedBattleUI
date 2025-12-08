@@ -1,4 +1,6 @@
 {
   "category.cobblemonextendedbattleui": "Cobblemon Extended Battle UI",
-  "key.cobblemonextendedbattleui.toggle_panel": "Toggle Battle Info Panel"
+  "key.cobblemonextendedbattleui.toggle_panel": "Toggle Battle Info Panel",
+  "key.cobblemonextendedbattleui.increase_font": "Increase Panel Font Size",
+  "key.cobblemonextendedbattleui.decrease_font": "Decrease Panel Font Size"
 }

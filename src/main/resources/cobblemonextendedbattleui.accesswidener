@@ -1,7 +1,1 @@
 accessWidener v2 named
-
-# Access widener for Cobblemon Extended Battle UI modifications
-# Add entries here to access private/protected Cobblemon classes and methods
-# Example:
-# accessible class com/cobblemon/mod/common/client/gui/battle/BattleOverlay
-# accessible method com/cobblemon/mod/common/client/gui/battle/BattleOverlay render (Lnet/minecraft/client/gui/DrawContext;FF)V

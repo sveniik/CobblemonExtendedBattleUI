@@ -4,8 +4,7 @@ import net.minecraft.text.Text
 import net.minecraft.text.TranslatableTextContent
 
 /**
- * Intercepts battle messages and extracts battle state information.
- * Updates BattleStateTracker based on detected events.
+ * Intercepts battle messages and updates BattleStateTracker.
  */
 object BattleMessageInterceptor {
 

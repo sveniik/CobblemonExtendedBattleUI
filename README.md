@@ -1,4 +1,4 @@
-# Cobblemon Battle UI
+# Cobblemon Extended Battle UI
 
 A client-side Fabric mod that adds helpful information displays to Cobblemon battles.
 
@@ -8,7 +8,7 @@ During Cobblemon battles, this mod shows you information that's normally hard to
 
 ### Battle Info Panel
 
-A small panel on your screen that displays:
+A panel on your screen that displays:
 
 - **Weather & Terrain** - Shows active weather (rain, sun, sandstorm, etc.) and terrain effects with remaining turn counters
 - **Field Effects** - Trick Room, Gravity, and other field-wide conditions
@@ -18,6 +18,8 @@ A small panel on your screen that displays:
 
 The panel shows turn ranges like "5-8" when we don't know if the opponent has items that extend duration (like Light Clay for screens or weather rocks).
 
+This panel is also fully resizable, moveable, and collapsible if you only want to see a quick glance of relevant information!
+
 ### Team Pokeballs
 
 Small pokeball indicators below each team's health bars showing:
@@ -25,14 +27,20 @@ Small pokeball indicators below each team's health bars showing:
 - Which Pokemon have status conditions (colored pokeballs)
 - Which Pokemon have fainted (gray pokeballs)
 
+### What this mod does NOT do
+
+This mod does not give you any information that you could not otherwise have obtained. Opposition team size, team members, stats, moves, etc... are not and will never will be in the scope for this mod. This mod is intended to only give any information that you could get via common knowledge, note taking, or reading the match log in a quick and easy way as a QOL upgrade.
+
 ## Controls
 
 - **V or Click header** - Show/hide the detailed panel
 - **Drag the header** - Move the panel anywhere on screen
-- **CTRL + Scroll wheel** - Scroll up to increase font size, scroll down to decrease it
+- **CTRL + Scroll wheel or [ and ]** - Scroll up or press ] to increase font size, scroll down or press [ to decrease it
 - **Drag sides or corners** - Resize panel
 
-Your preferences are saved automatically.
+You can also rebind these keys to anything you want within the keybind settings menu.
+
+Your preferences for panel size and state are saved automatically.
 
 ## Requirements
 

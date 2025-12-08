@@ -6,7 +6,6 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Comprehensive battle state tracker for client-side battle information.
  * Tracks weather, terrain, field conditions, side conditions, and stat changes.
  */
 object BattleStateTracker {

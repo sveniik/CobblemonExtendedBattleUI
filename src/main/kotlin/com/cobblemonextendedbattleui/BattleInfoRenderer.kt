@@ -10,5 +10,6 @@ object BattleInfoRenderer {
     fun render(context: DrawContext) {
         TeamIndicatorUI.render(context)
         BattleInfoPanel.render(context)
+        BattleLogWidget.render(context)
     }
 }

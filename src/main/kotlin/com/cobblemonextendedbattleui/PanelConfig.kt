@@ -15,6 +15,10 @@ object PanelConfig {
         FabricLoader.getInstance().configDir.resolve("cobblemonextendedbattleui.json").toFile()
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Configuration values
+    // ═══════════════════════════════════════════════════════════════════════════
+
     // Base dimensions (default size)
     const val DEFAULT_WIDTH = 200
 
@@ -41,6 +45,46 @@ object PanelConfig {
     var startExpanded: Boolean = false
         private set
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Battle log widget settings
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Whether to replace Cobblemon's battle log with our custom log
+    var replaceBattleLog: Boolean = true
+        private set
+
+    // Log widget position (null = default bottom-center position)
+    var logX: Int? = null
+        private set
+    var logY: Int? = null
+        private set
+
+    // Log widget dimensions
+    var logWidth: Int? = null
+        private set
+    var logHeight: Int? = null
+        private set
+
+    // Log widget font scale (separate from main panel)
+    var logFontScale: Float = 1.0f
+        private set
+
+    // Log widget expanded state
+    var logExpanded: Boolean = true
+        private set
+
+    // Default log dimensions
+    const val DEFAULT_LOG_WIDTH = 200
+    const val DEFAULT_LOG_HEIGHT = 120
+    const val MIN_LOG_WIDTH = 120
+    const val MIN_LOG_HEIGHT = 60
+    const val MAX_LOG_WIDTH = 400
+    const val MAX_LOG_HEIGHT = 300
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Constants
+    // ═══════════════════════════════════════════════════════════════════════════
+
     // Font scale limits
     const val MIN_FONT_SCALE = 0.5f
     const val MAX_FONT_SCALE = 2.0f
@@ -49,13 +93,25 @@ object PanelConfig {
     // Maximum screen percentage for panel size
     const val MAX_SCREEN_PERCENTAGE = 0.85f
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Data class for serialization
+    // ═══════════════════════════════════════════════════════════════════════════
+
     data class ConfigData(
         val panelX: Int? = null,
         val panelY: Int? = null,
         val panelWidth: Int? = null,
         val panelHeight: Int? = null,
         val fontScale: Float = 1.0f,
-        val startExpanded: Boolean = false
+        val startExpanded: Boolean = false,
+        // Battle log widget settings
+        val replaceBattleLog: Boolean = true,
+        val logX: Int? = null,
+        val logY: Int? = null,
+        val logWidth: Int? = null,
+        val logHeight: Int? = null,
+        val logFontScale: Float = 1.0f,
+        val logExpanded: Boolean = true
     )
 
     fun load() {
@@ -68,7 +124,15 @@ object PanelConfig {
                 panelHeight = data.panelHeight
                 fontScale = data.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
                 startExpanded = data.startExpanded
-                CobblemonExtendedBattleUI.LOGGER.info("PanelConfig: Loaded config - pos=(${panelX}, ${panelY}), size=(${panelWidth}, ${panelHeight}), fontScale=$fontScale")
+                // Battle log widget settings
+                replaceBattleLog = data.replaceBattleLog
+                logX = data.logX
+                logY = data.logY
+                logWidth = data.logWidth
+                logHeight = data.logHeight
+                logFontScale = data.logFontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+                logExpanded = data.logExpanded
+                CobblemonExtendedBattleUI.LOGGER.info("PanelConfig: Loaded config - panel pos=(${panelX}, ${panelY}), log pos=(${logX}, ${logY})")
             }
         } catch (e: Exception) {
             CobblemonExtendedBattleUI.LOGGER.warn("PanelConfig: Failed to load config, using defaults: ${e.message}")
@@ -77,7 +141,21 @@ object PanelConfig {
 
     fun save() {
         try {
-            val data = ConfigData(panelX, panelY, panelWidth, panelHeight, fontScale, startExpanded)
+            val data = ConfigData(
+                panelX = panelX,
+                panelY = panelY,
+                panelWidth = panelWidth,
+                panelHeight = panelHeight,
+                fontScale = fontScale,
+                startExpanded = startExpanded,
+                replaceBattleLog = replaceBattleLog,
+                logX = logX,
+                logY = logY,
+                logWidth = logWidth,
+                logHeight = logHeight,
+                logFontScale = logFontScale,
+                logExpanded = logExpanded
+            )
             configFile.parentFile?.mkdirs()
             configFile.writeText(gson.toJson(data))
             CobblemonExtendedBattleUI.LOGGER.debug("PanelConfig: Saved config")
@@ -115,4 +193,34 @@ object PanelConfig {
     fun getMaxWidth(screenWidth: Int): Int = (screenWidth * MAX_SCREEN_PERCENTAGE).toInt()
 
     fun getMaxHeight(screenHeight: Int): Int = (screenHeight * MAX_SCREEN_PERCENTAGE).toInt()
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Log widget management
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    fun setLogPosition(x: Int?, y: Int?) {
+        logX = x
+        logY = y
+    }
+
+    fun setLogDimensions(width: Int?, height: Int?) {
+        logWidth = width?.coerceIn(MIN_LOG_WIDTH, MAX_LOG_WIDTH)
+        logHeight = height?.coerceIn(MIN_LOG_HEIGHT, MAX_LOG_HEIGHT)
+    }
+
+    fun adjustLogFontScale(delta: Float) {
+        logFontScale = (logFontScale + delta).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+    }
+
+    fun setLogExpanded(expanded: Boolean) {
+        logExpanded = expanded
+    }
+
+    /**
+     * Toggle the replaceBattleLog setting.
+     */
+    fun toggleReplaceBattleLog() {
+        replaceBattleLog = !replaceBattleLog
+        save()
+    }
 }

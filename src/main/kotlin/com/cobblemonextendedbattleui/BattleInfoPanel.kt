@@ -132,6 +132,15 @@ object BattleInfoPanel {
         previouslyActiveUUIDs = emptySet()
     }
 
+    /**
+     * Check if a point is within the given bounds array [x, y, w, h].
+     */
+    private fun isOverBounds(mouseX: Int, mouseY: Int, bounds: IntArray): Boolean {
+        if (bounds.size < 4) return false
+        return mouseX >= bounds[0] && mouseX <= bounds[0] + bounds[2] &&
+               mouseY >= bounds[1] && mouseY <= bounds[1] + bounds[3]
+    }
+
     private fun color(r: Int, g: Int, b: Int, a: Int): Int = (a shl 24) or (r shl 16) or (g shl 8) or b
 
     private fun updateScaledValues() {
@@ -411,12 +420,14 @@ object BattleInfoPanel {
                 PanelConfig.adjustFontScale(delta)
                 PanelConfig.save()
                 return true
-            } else if (contentHeight > visibleContentHeight) {
+            } else {
                 // Normal scroll: scroll content
                 val scrollAmount = (lineHeight * 2 * if (deltaY > 0) -1 else 1)
-                val maxScroll = (contentHeight - visibleContentHeight).coerceAtLeast(0)
-                PanelConfig.scrollOffset = (PanelConfig.scrollOffset + scrollAmount).coerceIn(0, maxScroll)
-                return true
+                if (contentHeight > visibleContentHeight) {
+                    val maxScroll = (contentHeight - visibleContentHeight).coerceAtLeast(0)
+                    PanelConfig.scrollOffset = (PanelConfig.scrollOffset + scrollAmount).coerceIn(0, maxScroll)
+                    return true
+                }
             }
         }
         return false
@@ -680,6 +691,14 @@ object BattleInfoPanel {
         drawRoundedRect(context, x, y, width, height, PANEL_BG, BORDER_COLOR)
         renderHeader(context, x, y, width)
 
+        // Render content
+        renderInfoTab(context, x, y, width, height, pokemonWithStats)
+    }
+
+    /**
+     * Render the Info tab content (field conditions, side conditions, stat stages).
+     */
+    private fun renderInfoTab(context: DrawContext, x: Int, y: Int, width: Int, height: Int, pokemonWithStats: List<Triple<UUID, String, List<Map.Entry<com.cobblemon.mod.common.api.pokemon.stats.Stat, Int>>>>) {
         val contentStartY = y + HEADER_HEIGHT + SECTION_GAP
         val contentAreaHeight = height - HEADER_HEIGHT - PADDING
         val scrollbarSpace = if (contentHeight > visibleContentHeight) SCROLLBAR_WIDTH + 4 else 0
@@ -850,15 +869,29 @@ object BattleInfoPanel {
         headerEndY = y + HEADER_HEIGHT
         context.fill(x, y + HEADER_HEIGHT - 1, x + width, y + HEADER_HEIGHT, BORDER_COLOR)
 
-        val arrow = if (isExpanded) "▼" else "▶"
         val headerTextY = y + (HEADER_HEIGHT - (8 * textScale).toInt()) / 2
-        drawText(context, arrow, (x + PADDING).toFloat(), headerTextY.toFloat(), TEXT_GOLD, 0.85f * textScale)
-        drawText(context, "BATTLE INFO", (x + PADDING + (12 * textScale).toInt()).toFloat(), headerTextY.toFloat(), TEXT_WHITE, 0.85f * textScale)
 
-        val turnText = "T${BattleStateTracker.currentTurn}"
-        val charWidth = (5 * textScale).toInt()
-        drawText(context, turnText, (x + width - PADDING - turnText.length * charWidth).toFloat(),
-            headerTextY.toFloat(), TEXT_GOLD, 0.85f * textScale)
+        if (isExpanded) {
+            // Expanded mode: show title and turn indicator
+            val arrow = "▼"
+            drawText(context, arrow, (x + PADDING).toFloat(), headerTextY.toFloat(), TEXT_GOLD, 0.85f * textScale)
+            drawText(context, "BATTLE INFO", (x + PADDING + (12 * textScale).toInt()).toFloat(), headerTextY.toFloat(), TEXT_WHITE, 0.85f * textScale)
+
+            val turnText = "T${BattleStateTracker.currentTurn}"
+            val charWidth = (5 * textScale).toInt()
+            drawText(context, turnText, (x + width - PADDING - turnText.length * charWidth).toFloat(),
+                headerTextY.toFloat(), TEXT_GOLD, 0.85f * textScale)
+        } else {
+            // Collapsed mode: show arrow and title
+            val arrow = "▶"
+            drawText(context, arrow, (x + PADDING).toFloat(), headerTextY.toFloat(), TEXT_GOLD, 0.85f * textScale)
+            drawText(context, "BATTLE INFO", (x + PADDING + (12 * textScale).toInt()).toFloat(), headerTextY.toFloat(), TEXT_WHITE, 0.85f * textScale)
+
+            val turnText = "T${BattleStateTracker.currentTurn}"
+            val charWidth = (5 * textScale).toInt()
+            drawText(context, turnText, (x + width - PADDING - turnText.length * charWidth).toFloat(),
+                headerTextY.toFloat(), TEXT_GOLD, 0.85f * textScale)
+        }
     }
 
     private fun renderSection(

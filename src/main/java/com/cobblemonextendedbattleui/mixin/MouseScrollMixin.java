@@ -1,6 +1,7 @@
 package com.cobblemonextendedbattleui.mixin;
 
 import com.cobblemonextendedbattleui.BattleInfoPanel;
+import com.cobblemonextendedbattleui.BattleLogWidget;
 import com.cobblemon.mod.common.client.CobblemonClient;
 import net.minecraft.client.Mouse;
 import org.spongepowered.asm.mixin.Mixin;
@@ -29,9 +30,14 @@ public abstract class MouseScrollMixin {
     private void onScroll(long window, double horizontal, double vertical, CallbackInfo ci) {
         // Only intercept during battle
         if (CobblemonClient.INSTANCE.getBattle() != null) {
-            // Let the panel try to handle the scroll
+            // Let the battle log widget try to handle the scroll first
+            if (BattleLogWidget.INSTANCE.onScroll(this.x, this.y, vertical)) {
+                ci.cancel();
+                return;
+            }
+            // Then try the info panel
             if (BattleInfoPanel.INSTANCE.onScroll(this.x, this.y, vertical)) {
-                ci.cancel();  // Consume the event if panel handled it
+                ci.cancel();
             }
         }
     }

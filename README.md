@@ -15,10 +15,23 @@ A panel on your screen that displays:
 - **Your Side's Effects** - Screens (Reflect, Light Screen), hazards on your side, Tailwind, etc.
 - **Enemy's Effects** - Same as above, but for the opponent
 - **Stat Changes** - Shows every Pokemon's stat boosts and drops with easy-to-read arrows
+- **Volatile Effects** - Taunt, Encore, Perish Song, Confusion, and other per-Pokemon effects with turn timers
 
 The panel shows turn ranges like "5-8" when we don't know if the opponent has items that extend duration (like Light Clay for screens or weather rocks).
 
 This panel is also fully resizable, moveable, and collapsible if you only want to see a quick glance of relevant information!
+
+### Battle Log
+
+A custom battle log that replaces Cobblemon's default log:
+
+- **Damage Percentages** - Shows how much damage each attack dealt (e.g., "→ 35% to Clefable")
+- **Healing Tracking** - Healing shown in green (e.g., "→ +15% to Charizard")
+- **Color-Coded Messages** - Different colors for moves, HP changes, effects, and field conditions
+- **Turn Separators** - Clear visual separation between turns
+- **Auto-Scroll** - Follows new messages automatically, stops when you scroll up manually
+
+The battle log uses Cobblemon's native textures and is fully resizable, moveable, and has adjustable font size.
 
 ### Team Pokeballs
 
@@ -33,14 +46,20 @@ This mod does not give you any information that you could not otherwise have obt
 
 ## Controls
 
-- **V or Click header** - Show/hide the detailed panel
+### Battle Info Panel & Battle Log
 - **Drag the header** - Move the panel anywhere on screen
-- **CTRL + Scroll wheel or [ and ]** - Scroll up or press ] to increase font size, scroll down or press [ to decrease it (the [ and ] keys are taken from a US keyboard layout, they will by default be the corresponding keys in your keyboard language)
+- **Ctrl + Scroll or [ and ]** - Adjust font size
 - **Drag sides or corners** - Resize panel
 
-You can also rebind these keys to anything you want within the keybind settings menu.
+### Battle Info
+- **V or Click header** - Show/hide the detailed panel
 
-Your preferences for panel size and state are saved automatically.
+### Battle Log
+- **Click bottom-right arrow** - Expand/collapse the log
+
+You can rebind keys in the Minecraft keybind settings menu.
+
+Your preferences for panel/log size, position, and state are saved automatically.
 
 ## Requirements
 

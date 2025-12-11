@@ -62,9 +62,7 @@ object BattleLogWidget {
     private fun color(r: Int, g: Int, b: Int, a: Int = 255): Int = (a shl 24) or (r shl 16) or (g shl 8) or b
 
     // Text colors
-    private val TEXT_WHITE = color(255, 255, 255)
     private val TEXT_DIM = color(150, 160, 175)
-    private val TEXT_GOLD = color(255, 210, 90)
 
     // Entry type colors
     private val COLOR_MOVE = color(255, 255, 255)
@@ -161,9 +159,9 @@ object BattleLogWidget {
         val expandedHeight = PanelConfig.logHeight ?: PanelConfig.DEFAULT_LOG_HEIGHT
         val height = if (isExpanded) expandedHeight else COLLAPSED_HEIGHT
 
-        // Default position: bottom center, above battle controls
+        // Default position: bottom right, above battle controls
         // We track position by BOTTOM edge so collapse/expand keeps bottom fixed
-        val defaultX = (screenWidth - width) / 2
+        val defaultX = screenWidth - width - 10  // 10px from right edge
         val defaultBottomY = screenHeight - 55  // Bottom edge position
 
         // Calculate Y from bottom edge (collapse downwards behavior)
@@ -178,6 +176,8 @@ object BattleLogWidget {
 
         // Render frame using 9-slice with Cobblemon textures
         renderFrame9Slice(context, x, y, width, height, isExpanded)
+        // Flush texture batch before any fill operations
+        context.draw()
         headerEndY = y + HEADER_HEIGHT
 
         // Always render the same content - "collapsed" is just a smaller preset size
@@ -545,37 +545,99 @@ object BattleLogWidget {
     // Rendering
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /**
+     * Begins a batch of fill operations.
+     * Must call endFillBatch() after all fills are done.
+     * This flushes DrawContext's pending operations to avoid Tessellator conflicts.
+     */
+    private fun beginFillBatch(context: DrawContext) {
+        // Flush any pending texture draws before we start fills
+        // This is critical because DrawContext batches operations and shares the Tessellator
+        context.draw()
+        RenderSystem.enableBlend()
+        RenderSystem.defaultBlendFunc()
+    }
+
+    /**
+     * Ends a batch of fill operations and restores state for texture rendering.
+     */
+    private fun endFillBatch(context: DrawContext) {
+        // Flush the fills we just drew
+        context.draw()
+        // Blend stays enabled (needed for textures with alpha)
+    }
+
     private fun renderResizeHandles(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
         val handleColor = if (hoveredZone != UIUtils.ResizeZone.NONE || isResizing) RESIZE_HANDLE_HOVER else RESIZE_HANDLE_COLOR
         val cornerLength = 12
         val thickness = 2
 
-        UIUtils.drawCornerHandle(context, x + width, y + height, cornerLength, thickness, handleColor, bottomRight = true)
+        beginFillBatch(context)
+
+        // Bottom-right corner (always visible when hovering resize zone)
+        drawCornerHandle(context, x + width, y + height, cornerLength, thickness, handleColor, bottomRight = true)
 
         if (hoveredZone != UIUtils.ResizeZone.NONE || isResizing) {
-            UIUtils.drawCornerHandle(context, x, y, cornerLength, thickness, handleColor, topLeft = true)
-            UIUtils.drawCornerHandle(context, x + width, y, cornerLength, thickness, handleColor, topRight = true)
-            UIUtils.drawCornerHandle(context, x, y + height, cornerLength, thickness, handleColor, bottomLeft = true)
+            // Other corners
+            drawCornerHandle(context, x, y, cornerLength, thickness, handleColor, topLeft = true)
+            drawCornerHandle(context, x + width, y, cornerLength, thickness, handleColor, topRight = true)
+            drawCornerHandle(context, x, y + height, cornerLength, thickness, handleColor, bottomLeft = true)
 
+            // Edge handles
             val edgeLength = 16
             val midX = x + width / 2
             val midY = y + height / 2
 
+            // Top edge
             context.fill(midX - edgeLength / 2, y, midX + edgeLength / 2, y + thickness, handleColor)
+            // Bottom edge
             context.fill(midX - edgeLength / 2, y + height - thickness, midX + edgeLength / 2, y + height, handleColor)
+            // Left edge
             context.fill(x, midY - edgeLength / 2, x + thickness, midY + edgeLength / 2, handleColor)
+            // Right edge
             context.fill(x + width - thickness, midY - edgeLength / 2, x + width, midY + edgeLength / 2, handleColor)
+        }
+
+        endFillBatch(context)
+    }
+
+    /**
+     * Draws an L-shaped corner handle using context.fill().
+     * Must be called within a beginFillBatch/endFillBatch block.
+     */
+    private fun drawCornerHandle(
+        context: DrawContext,
+        cornerX: Int,
+        cornerY: Int,
+        length: Int,
+        thickness: Int,
+        color: Int,
+        topLeft: Boolean = false,
+        topRight: Boolean = false,
+        bottomLeft: Boolean = false,
+        bottomRight: Boolean = false
+    ) {
+        when {
+            topLeft -> {
+                context.fill(cornerX, cornerY, cornerX + length, cornerY + thickness, color)
+                context.fill(cornerX, cornerY, cornerX + thickness, cornerY + length, color)
+            }
+            topRight -> {
+                context.fill(cornerX - length, cornerY, cornerX, cornerY + thickness, color)
+                context.fill(cornerX - thickness, cornerY, cornerX, cornerY + length, color)
+            }
+            bottomLeft -> {
+                context.fill(cornerX, cornerY - thickness, cornerX + length, cornerY, color)
+                context.fill(cornerX, cornerY - length, cornerX + thickness, cornerY, color)
+            }
+            bottomRight -> {
+                context.fill(cornerX - length, cornerY - thickness, cornerX, cornerY, color)
+                context.fill(cornerX - thickness, cornerY - length, cornerX, cornerY, color)
+            }
         }
     }
 
     private fun renderContent(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
-        val headerTextY = y + SLICE_TOP + 2  // Push down to avoid outline
-
-        // Header title
-        drawText(context, "Battle Log", (x + PADDING + LOG_TEXT_INDENT).toFloat(), headerTextY.toFloat(), TEXT_WHITE, 0.8f)
-
-        // No drawn arrow - the Cobblemon texture has a built-in indicator in bottom-right
-
         // Content area (leave space at bottom for texture's built-in arrow area)
         val contentY = y + HEADER_HEIGHT + 2
         val contentAreaHeight = height - HEADER_HEIGHT - 14  // Space at bottom for arrow region
@@ -764,6 +826,8 @@ object BattleLogWidget {
         val lineStartRight = textX + actualTextWidth + gap
 
         // Subtle horizontal lines
+        RenderSystem.enableBlend()
+        RenderSystem.defaultBlendFunc()
         context.fill(x, centerY, lineEndLeft.coerceAtLeast(x), centerY + 1, TURN_LINE_COLOR)
         context.fill(lineStartRight.coerceAtMost(x + width), centerY, x + width, centerY + 1, TURN_LINE_COLOR)
 
@@ -772,8 +836,13 @@ object BattleLogWidget {
     }
 
     private fun renderScrollbar(context: DrawContext, x: Int, y: Int, height: Int) {
+        RenderSystem.enableBlend()
+        RenderSystem.defaultBlendFunc()
+
+        // Background track
         context.fill(x, y, x + SCROLLBAR_WIDTH, y + height, SCROLLBAR_BG)
 
+        // Thumb
         val thumbHeight = ((visibleHeight.toFloat() / contentHeight) * height).toInt().coerceAtLeast(10)
         val maxScroll = contentHeight - visibleHeight
         val ratio = if (maxScroll > 0) scrollOffset.toFloat() / maxScroll else 0f

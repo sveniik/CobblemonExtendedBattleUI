@@ -69,6 +69,7 @@ object BattleLogWidget {
     // Entry type colors
     private val COLOR_MOVE = color(255, 255, 255)
     private val COLOR_HP = color(120, 195, 255)
+    private val COLOR_HEALING = color(100, 220, 100)  // Green for healing
     private val COLOR_EFFECT = color(255, 215, 90)
     private val COLOR_FIELD = color(160, 255, 160)
     private val COLOR_OTHER = color(175, 175, 185)
@@ -86,21 +87,16 @@ object BattleLogWidget {
     private val RESIZE_HANDLE_HOVER = color(120, 150, 190, 255)
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Resize zones
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    enum class ResizeZone {
-        NONE, LEFT, RIGHT, TOP, BOTTOM,
-        TOP_LEFT, TOP_RIGHT, BOTTOM_LEFT, BOTTOM_RIGHT
-    }
-
-    // ═══════════════════════════════════════════════════════════════════════════
     // State
     // ═══════════════════════════════════════════════════════════════════════════
 
     private var scrollOffset: Int = 0
     private var contentHeight: Int = 0
     private var visibleHeight: Int = 0
+
+    // Auto-scroll tracking: if user is at/near bottom, auto-follow new content
+    private var isFollowingBottom: Boolean = true
+    private const val BOTTOM_THRESHOLD = 5  // Pixels from bottom to consider "at bottom"
 
     // Input tracking
     private var wasMousePressed: Boolean = false
@@ -114,7 +110,7 @@ object BattleLogWidget {
 
     // Resize state
     private var isResizing: Boolean = false
-    private var resizeZone: ResizeZone = ResizeZone.NONE
+    private var resizeZone: UIUtils.ResizeZone = UIUtils.ResizeZone.NONE
     private var resizeStartX: Int = 0
     private var resizeStartY: Int = 0
     private var resizeStartWidth: Int = 0
@@ -123,7 +119,7 @@ object BattleLogWidget {
     private var resizeStartPanelY: Int = 0
 
     // Hover state
-    private var hoveredZone: ResizeZone = ResizeZone.NONE
+    private var hoveredZone: UIUtils.ResizeZone = UIUtils.ResizeZone.NONE
 
     // Bounds for click detection
     private var widgetX: Int = 0
@@ -188,7 +184,7 @@ object BattleLogWidget {
         renderContent(context, x, y, width, height)
 
         // Resize handles only when expanded (full size mode allows resizing)
-        if (isExpanded && (hoveredZone != ResizeZone.NONE || isResizing)) {
+        if (isExpanded && (hoveredZone != UIUtils.ResizeZone.NONE || isResizing)) {
             renderResizeHandles(context, x, y, width, height)
         }
     }
@@ -213,6 +209,7 @@ object BattleLogWidget {
         if (ctrlDown) {
             val delta = if (deltaY > 0) PanelConfig.FONT_SCALE_STEP else -PanelConfig.FONT_SCALE_STEP
             PanelConfig.adjustLogFontScale(delta)
+            BattleLog.invalidateWrappedTextCache()  // Font scale changed, invalidate cache
             PanelConfig.save()
             return true
         }
@@ -222,6 +219,10 @@ object BattleLogWidget {
             val scrollAmount = (lineHeight * 2 * if (deltaY > 0) -1 else 1)
             val maxScroll = (contentHeight - visibleHeight).coerceAtLeast(0)
             scrollOffset = (scrollOffset + scrollAmount).coerceIn(0, maxScroll)
+
+            // Update follow state: if user scrolled to bottom, start following again
+            // If user scrolled up away from bottom, stop following
+            isFollowingBottom = scrollOffset >= maxScroll - BOTTOM_THRESHOLD
             return true
         }
         return false
@@ -229,6 +230,7 @@ object BattleLogWidget {
 
     fun clear() {
         scrollOffset = 0
+        isFollowingBottom = true
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -378,9 +380,12 @@ object BattleLogWidget {
             handleFontKeybinds(handle)
         }
 
-        // Update hover state
-        if (!isDragging && !isResizing) {
+        // Only update hover state when this panel can interact
+        val canInteract = UIUtils.canInteract(UIUtils.ActivePanel.BATTLE_LOG)
+        if (!isDragging && !isResizing && canInteract) {
             hoveredZone = getResizeZone(mouseX, mouseY)
+        } else if (!canInteract) {
+            hoveredZone = UIUtils.ResizeZone.NONE
         }
 
         val isOverHeader = isOverWidget && mouseY <= headerEndY
@@ -397,10 +402,12 @@ object BattleLogWidget {
                 !wasMousePressed && isOverToggle -> {
                     PanelConfig.setLogExpanded(!PanelConfig.logExpanded)
                     scrollOffset = 0
+                    isFollowingBottom = true  // Reset to following on toggle
                     PanelConfig.save()
                 }
                 // Start resize
-                !wasMousePressed && hoveredZone != ResizeZone.NONE -> {
+                !wasMousePressed && canInteract && hoveredZone != UIUtils.ResizeZone.NONE -> {
+                    UIUtils.claimInteraction(UIUtils.ActivePanel.BATTLE_LOG)
                     isResizing = true
                     resizeZone = hoveredZone
                     resizeStartX = mouseX
@@ -415,7 +422,8 @@ object BattleLogWidget {
                     handleResize(mouseX, mouseY, screenWidth, screenHeight)
                 }
                 // Start dragging (from header, excluding toggle)
-                !wasMousePressed && isOverHeader && !isOverToggle -> {
+                !wasMousePressed && canInteract && isOverHeader && !isOverToggle -> {
+                    UIUtils.claimInteraction(UIUtils.ActivePanel.BATTLE_LOG)
                     isDragging = true
                     dragOffsetX = mouseX - widgetX
                     dragOffsetY = mouseY - widgetY
@@ -428,8 +436,11 @@ object BattleLogWidget {
                 }
             }
         } else {
-            if (isDragging || isResizing) {
+            // Release interaction when mouse is released
+            val wasInteracting = isDragging || isResizing
+            if (wasInteracting) {
                 PanelConfig.save()
+                UIUtils.releaseInteraction(UIUtils.ActivePanel.BATTLE_LOG)
             }
             isDragging = false
             isResizing = false
@@ -443,6 +454,7 @@ object BattleLogWidget {
         val isIncreaseDown = isKeyOrButtonPressed(handle, increaseKey)
         if (isIncreaseDown && !wasIncreaseFontKeyPressed) {
             PanelConfig.adjustLogFontScale(PanelConfig.FONT_SCALE_STEP)
+            BattleLog.invalidateWrappedTextCache()  // Font scale changed, invalidate cache
             PanelConfig.save()
         }
         wasIncreaseFontKeyPressed = isIncreaseDown
@@ -451,6 +463,7 @@ object BattleLogWidget {
         val isDecreaseDown = isKeyOrButtonPressed(handle, decreaseKey)
         if (isDecreaseDown && !wasDecreaseFontKeyPressed) {
             PanelConfig.adjustLogFontScale(-PanelConfig.FONT_SCALE_STEP)
+            BattleLog.invalidateWrappedTextCache()  // Font scale changed, invalidate cache
             PanelConfig.save()
         }
         wasDecreaseFontKeyPressed = isDecreaseDown
@@ -463,85 +476,69 @@ object BattleLogWidget {
         }
     }
 
-    private fun getResizeZone(mouseX: Int, mouseY: Int): ResizeZone {
-        if (!PanelConfig.logExpanded) return ResizeZone.NONE
+    private fun getResizeZone(mouseX: Int, mouseY: Int): UIUtils.ResizeZone {
+        // Only allow resize in expanded mode
+        if (!PanelConfig.logExpanded) return UIUtils.ResizeZone.NONE
 
         val x = widgetX
         val y = widgetY
         val w = widgetW
         val h = widgetH
 
-        val onLeft = mouseX >= x - RESIZE_HANDLE_SIZE && mouseX <= x + RESIZE_HANDLE_SIZE
-        val onRight = mouseX >= x + w - RESIZE_HANDLE_SIZE && mouseX <= x + w + RESIZE_HANDLE_SIZE
-        val onTop = mouseY >= y - RESIZE_HANDLE_SIZE && mouseY <= y + 2
-        val onBottom = mouseY >= y + h - RESIZE_HANDLE_SIZE && mouseY <= y + h + RESIZE_HANDLE_SIZE
+        // Corner detection zones (L-shaped areas around corners)
+        val cornerSize = 15  // Size of the corner detection zone
+
+        val nearLeft = mouseX >= x - RESIZE_HANDLE_SIZE && mouseX <= x + cornerSize
+        val nearRight = mouseX >= x + w - cornerSize && mouseX <= x + w + RESIZE_HANDLE_SIZE
+        val nearTop = mouseY >= y - RESIZE_HANDLE_SIZE && mouseY <= y + cornerSize
+        val nearBottom = mouseY >= y + h - cornerSize && mouseY <= y + h + RESIZE_HANDLE_SIZE
+
+        // Edge detection (middle portions of edges)
+        val edgeZone = 8  // How close to edge to trigger
+        val onLeftEdge = mouseX >= x - edgeZone && mouseX <= x + edgeZone
+        val onRightEdge = mouseX >= x + w - edgeZone && mouseX <= x + w + edgeZone
+        val onTopEdge = mouseY >= y - edgeZone && mouseY <= y + edgeZone
+        val onBottomEdge = mouseY >= y + h - edgeZone && mouseY <= y + h + edgeZone
+
         val withinX = mouseX >= x - RESIZE_HANDLE_SIZE && mouseX <= x + w + RESIZE_HANDLE_SIZE
         val withinY = mouseY >= y - RESIZE_HANDLE_SIZE && mouseY <= y + h + RESIZE_HANDLE_SIZE
 
         return when {
-            onTop && onLeft && withinX && withinY -> ResizeZone.TOP_LEFT
-            onTop && onRight && withinX && withinY -> ResizeZone.TOP_RIGHT
-            onBottom && onLeft && withinX && withinY -> ResizeZone.BOTTOM_LEFT
-            onBottom && onRight && withinX && withinY -> ResizeZone.BOTTOM_RIGHT
-            onLeft && withinY -> ResizeZone.LEFT
-            onRight && withinY -> ResizeZone.RIGHT
-            onTop && withinX -> ResizeZone.TOP
-            onBottom && withinX -> ResizeZone.BOTTOM
-            else -> ResizeZone.NONE
+            // Corners (prioritize these - L-shaped detection)
+            nearTop && nearLeft -> UIUtils.ResizeZone.TOP_LEFT
+            nearTop && nearRight -> UIUtils.ResizeZone.TOP_RIGHT
+            nearBottom && nearLeft -> UIUtils.ResizeZone.BOTTOM_LEFT
+            nearBottom && nearRight -> UIUtils.ResizeZone.BOTTOM_RIGHT
+
+            // Edges (only the middle portions)
+            onLeftEdge && withinY && !nearTop && !nearBottom -> UIUtils.ResizeZone.LEFT
+            onRightEdge && withinY && !nearTop && !nearBottom -> UIUtils.ResizeZone.RIGHT
+            onTopEdge && withinX && !nearLeft && !nearRight -> UIUtils.ResizeZone.TOP
+            onBottomEdge && withinX && !nearLeft && !nearRight -> UIUtils.ResizeZone.BOTTOM
+
+            else -> UIUtils.ResizeZone.NONE
         }
     }
 
     private fun handleResize(mouseX: Int, mouseY: Int, screenWidth: Int, screenHeight: Int) {
-        val deltaX = mouseX - resizeStartX
-        val deltaY = mouseY - resizeStartY
+        val result = UIUtils.calculateResize(
+            zone = resizeZone,
+            deltaX = mouseX - resizeStartX,
+            deltaY = mouseY - resizeStartY,
+            startX = resizeStartPanelX,
+            startY = resizeStartPanelY,
+            startWidth = resizeStartWidth,
+            startHeight = resizeStartHeight,
+            minWidth = PanelConfig.MIN_LOG_WIDTH,
+            maxWidth = PanelConfig.MAX_LOG_WIDTH,
+            minHeight = PanelConfig.MIN_LOG_HEIGHT,
+            maxHeight = PanelConfig.MAX_LOG_HEIGHT,
+            screenWidth = screenWidth,
+            screenHeight = screenHeight
+        )
 
-        var newWidth = resizeStartWidth
-        var newHeight = resizeStartHeight
-        var newX = resizeStartPanelX
-        var newY = resizeStartPanelY
-
-        when (resizeZone) {
-            ResizeZone.RIGHT -> newWidth = resizeStartWidth + deltaX
-            ResizeZone.BOTTOM -> newHeight = resizeStartHeight + deltaY
-            ResizeZone.BOTTOM_RIGHT -> {
-                newWidth = resizeStartWidth + deltaX
-                newHeight = resizeStartHeight + deltaY
-            }
-            ResizeZone.LEFT -> {
-                newWidth = resizeStartWidth - deltaX
-                newX = resizeStartPanelX + deltaX
-            }
-            ResizeZone.TOP -> {
-                newHeight = resizeStartHeight - deltaY
-                newY = resizeStartPanelY + deltaY
-            }
-            ResizeZone.TOP_LEFT -> {
-                newWidth = resizeStartWidth - deltaX
-                newHeight = resizeStartHeight - deltaY
-                newX = resizeStartPanelX + deltaX
-                newY = resizeStartPanelY + deltaY
-            }
-            ResizeZone.TOP_RIGHT -> {
-                newWidth = resizeStartWidth + deltaX
-                newHeight = resizeStartHeight - deltaY
-                newY = resizeStartPanelY + deltaY
-            }
-            ResizeZone.BOTTOM_LEFT -> {
-                newWidth = resizeStartWidth - deltaX
-                newHeight = resizeStartHeight + deltaY
-                newX = resizeStartPanelX + deltaX
-            }
-            ResizeZone.NONE -> {}
-        }
-
-        // Apply constraints
-        newWidth = newWidth.coerceIn(PanelConfig.MIN_LOG_WIDTH, PanelConfig.MAX_LOG_WIDTH)
-        newHeight = newHeight.coerceIn(PanelConfig.MIN_LOG_HEIGHT, PanelConfig.MAX_LOG_HEIGHT)
-        newX = newX.coerceIn(0, screenWidth - newWidth)
-        newY = newY.coerceIn(0, screenHeight - newHeight)
-
-        PanelConfig.setLogDimensions(newWidth, newHeight)
-        PanelConfig.setLogPosition(newX, newY)
+        PanelConfig.setLogDimensions(result.newWidth, result.newHeight)
+        PanelConfig.setLogPosition(result.newX, result.newY)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -549,33 +546,25 @@ object BattleLogWidget {
     // ═══════════════════════════════════════════════════════════════════════════
 
     private fun renderResizeHandles(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
-        val handleColor = if (isResizing) RESIZE_HANDLE_HOVER else RESIZE_HANDLE_COLOR
-        val hs = 3  // Handle visual size
+        val handleColor = if (hoveredZone != UIUtils.ResizeZone.NONE || isResizing) RESIZE_HANDLE_HOVER else RESIZE_HANDLE_COLOR
+        val cornerLength = 12
+        val thickness = 2
 
-        // Corner handles
-        when (hoveredZone) {
-            ResizeZone.TOP_LEFT, ResizeZone.LEFT, ResizeZone.TOP -> {
-                context.fill(x - 1, y - 1, x + hs, y + hs, handleColor)
-            }
-            else -> {}
-        }
-        when (hoveredZone) {
-            ResizeZone.TOP_RIGHT, ResizeZone.RIGHT, ResizeZone.TOP -> {
-                context.fill(x + width - hs, y - 1, x + width + 1, y + hs, handleColor)
-            }
-            else -> {}
-        }
-        when (hoveredZone) {
-            ResizeZone.BOTTOM_LEFT, ResizeZone.LEFT, ResizeZone.BOTTOM -> {
-                context.fill(x - 1, y + height - hs, x + hs, y + height + 1, handleColor)
-            }
-            else -> {}
-        }
-        when (hoveredZone) {
-            ResizeZone.BOTTOM_RIGHT, ResizeZone.RIGHT, ResizeZone.BOTTOM -> {
-                context.fill(x + width - hs, y + height - hs, x + width + 1, y + height + 1, handleColor)
-            }
-            else -> {}
+        UIUtils.drawCornerHandle(context, x + width, y + height, cornerLength, thickness, handleColor, bottomRight = true)
+
+        if (hoveredZone != UIUtils.ResizeZone.NONE || isResizing) {
+            UIUtils.drawCornerHandle(context, x, y, cornerLength, thickness, handleColor, topLeft = true)
+            UIUtils.drawCornerHandle(context, x + width, y, cornerLength, thickness, handleColor, topRight = true)
+            UIUtils.drawCornerHandle(context, x, y + height, cornerLength, thickness, handleColor, bottomLeft = true)
+
+            val edgeLength = 16
+            val midX = x + width / 2
+            val midY = y + height / 2
+
+            context.fill(midX - edgeLength / 2, y, midX + edgeLength / 2, y + thickness, handleColor)
+            context.fill(midX - edgeLength / 2, y + height - thickness, midX + edgeLength / 2, y + height, handleColor)
+            context.fill(x, midY - edgeLength / 2, x + thickness, midY + edgeLength / 2, handleColor)
+            context.fill(x + width - thickness, midY - edgeLength / 2, x + width, midY + edgeLength / 2, handleColor)
         }
     }
 
@@ -584,10 +573,6 @@ object BattleLogWidget {
 
         // Header title
         drawText(context, "Battle Log", (x + PADDING + LOG_TEXT_INDENT).toFloat(), headerTextY.toFloat(), TEXT_WHITE, 0.8f)
-
-        // Turn indicator
-        val turnText = "Turn ${BattleStateTracker.currentTurn}"
-        drawText(context, turnText, (x + width - PADDING - 45).toFloat(), headerTextY.toFloat(), TEXT_GOLD, 0.7f)
 
         // No drawn arrow - the Cobblemon texture has a built-in indicator in bottom-right
 
@@ -603,11 +588,23 @@ object BattleLogWidget {
 
         // Calculate content height with text wrapping
         val mc = MinecraftClient.getInstance()
+        val previousContentHeight = contentHeight
         contentHeight = calculateContentHeight(mc, maxTextContentWidth)
         visibleHeight = contentAreaHeight
 
         val maxScroll = (contentHeight - visibleHeight).coerceAtLeast(0)
-        scrollOffset = scrollOffset.coerceIn(0, maxScroll)
+
+        // Auto-scroll to bottom if following and content grew (new messages arrived)
+        if (isFollowingBottom && contentHeight > previousContentHeight) {
+            scrollOffset = maxScroll
+        } else {
+            scrollOffset = scrollOffset.coerceIn(0, maxScroll)
+        }
+
+        // Also update following state if we're now at/near bottom
+        if (maxScroll <= 0 || scrollOffset >= maxScroll - BOTTOM_THRESHOLD) {
+            isFollowingBottom = true
+        }
 
         // Now calculate actual widths based on whether scrollbar is needed
         val scrollbarSpace = if (contentHeight > visibleHeight) SCROLLBAR_WIDTH + 4 else 0
@@ -645,8 +642,10 @@ object BattleLogWidget {
 
             if (entry.type == BattleLog.EntryType.TURN) continue
 
-            // Calculate wrapped line count for this entry
-            val lines = wrapText(mc, entry.message.string, textWidth, fontScale)
+            // Use cached wrapped lines for performance
+            val lines = entry.getWrappedLines(textWidth, fontScale) { text, width, scale ->
+                wrapText(mc, text, width, scale)
+            }
             height += lineHeight * lines.size
         }
 
@@ -734,9 +733,11 @@ object BattleLogWidget {
 
             if (entry.type == BattleLog.EntryType.TURN) continue
 
-            // Render entry with text wrapping (uses indented position)
+            // Render entry with cached text wrapping (uses indented position)
             val color = getEntryColor(entry.type)
-            val lines = wrapText(mc, entry.message.string, textWidth, fontScale)
+            val lines = entry.getWrappedLines(textWidth, fontScale) { text, width, scale ->
+                wrapText(mc, text, width, scale)
+            }
 
             for (line in lines) {
                 if (currentY >= scissorMinY - lineHeight && currentY <= scissorMaxY) {
@@ -753,16 +754,20 @@ object BattleLogWidget {
 
         // No background - just subtle lines and text that blend with the texture
         val turnText = "Turn $turn"
-        val textWidth = (32 * PanelConfig.logFontScale).toInt()
-        val lineEndLeft = x + (width - textWidth) / 2 - 6
-        val lineStartRight = x + (width + textWidth) / 2 + 6
+        val mc = MinecraftClient.getInstance()
+        val actualTextWidth = (mc.textRenderer.getWidth(turnText) * fontScale).toInt()
+        val gap = 6  // Gap between line and text
+
+        // Calculate centered position for text
+        val textX = x + (width - actualTextWidth) / 2
+        val lineEndLeft = textX - gap
+        val lineStartRight = textX + actualTextWidth + gap
 
         // Subtle horizontal lines
         context.fill(x, centerY, lineEndLeft.coerceAtLeast(x), centerY + 1, TURN_LINE_COLOR)
         context.fill(lineStartRight.coerceAtMost(x + width), centerY, x + width, centerY + 1, TURN_LINE_COLOR)
 
         // Centered turn text
-        val textX = x + (width - textWidth) / 2
         drawText(context, turnText, textX.toFloat(), (y + 1).toFloat(), TURN_TEXT_COLOR, fontScale)
     }
 
@@ -785,6 +790,7 @@ object BattleLogWidget {
         return when (type) {
             BattleLog.EntryType.MOVE -> COLOR_MOVE
             BattleLog.EntryType.HP -> COLOR_HP
+            BattleLog.EntryType.HEALING -> COLOR_HEALING
             BattleLog.EntryType.EFFECT -> COLOR_EFFECT
             BattleLog.EntryType.FIELD -> COLOR_FIELD
             BattleLog.EntryType.TURN -> TURN_TEXT_COLOR

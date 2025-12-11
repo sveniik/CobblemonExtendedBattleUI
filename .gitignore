@@ -26,3 +26,7 @@ Thumbs.db
 
 # Local configuration
 local.properties
+
+# Claude Code
+.claude/
+CLAUDE.md

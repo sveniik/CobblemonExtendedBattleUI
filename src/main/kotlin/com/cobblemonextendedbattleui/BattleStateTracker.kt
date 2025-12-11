@@ -83,6 +83,65 @@ object BattleStateTracker {
         STICKY_WEB("Sticky Web", "🕸", null)
     }
 
+    /**
+     * Volatile statuses are per-Pokemon conditions that clear on switch.
+     * Based on official Pokemon mechanics from Bulbapedia.
+     * @see https://bulbapedia.bulbagarden.net/wiki/Status_condition#Volatile_status
+     *
+     * @param baseDuration Number of turns the effect lasts (null = indefinite/until cured)
+     * @param countsDown If true, displays as countdown (3, 2, 1). If false, displays elapsed turns.
+     */
+    enum class VolatileStatus(
+        val displayName: String,
+        val icon: String,
+        val isNegative: Boolean = true,
+        val baseDuration: Int? = null,
+        val countsDown: Boolean = false
+    ) {
+        // Seeding/Draining effects
+        LEECH_SEED("Leech Seed", "🌱"),
+
+        // Mental/Behavioral effects
+        CONFUSION("Confusion", "💫", baseDuration = 4),  // 2-5 turns, use 4 as average
+        TAUNT("Taunt", "😤", baseDuration = 3),
+        ENCORE("Encore", "🔁", baseDuration = 3),
+        DISABLE("Disable", "🚫", baseDuration = 4),
+        TORMENT("Torment", "😈"),
+        INFATUATION("Infatuation", "💕"),
+
+        // Countdown effects
+        PERISH_SONG("Perish Song", "💀", baseDuration = 4, countsDown = true),  // 3, 2, 1, faint
+        DROWSY("Drowsy", "😴", baseDuration = 1),  // Yawn - will sleep next turn
+
+        // Damage over time
+        CURSE("Curse", "👻"),  // Ghost-type curse - indefinite
+        NIGHTMARE("Nightmare", "😱"),
+        BOUND("Bound", "⛓", baseDuration = 5),  // Wrap, Bind, Fire Spin, etc. - 4-5 turns
+
+        // Movement restriction
+        TRAPPED("Trapped", "🚷"),  // Mean Look, Block, Spider Web - indefinite
+
+        // Protection/Healing (positive for the affected Pokemon)
+        SUBSTITUTE("Substitute", "🎭", isNegative = false),
+        AQUA_RING("Aqua Ring", "💧", isNegative = false),
+        INGRAIN("Ingrain", "🌳", isNegative = false),
+        FOCUS_ENERGY("Focus Energy", "🎯", isNegative = false),
+        MAGNET_RISE("Magnet Rise", "🧲", isNegative = false, baseDuration = 5),
+
+        // Prevention effects
+        EMBARGO("Embargo", "📦", baseDuration = 5),
+        HEAL_BLOCK("Heal Block", "💔", baseDuration = 5),
+
+        // Other
+        DESTINY_BOND("Destiny Bond", "🔗", isNegative = false),
+        FLINCH("Flinch", "💥")
+    }
+
+    data class VolatileStatusState(
+        val type: VolatileStatus,
+        val startTurn: Int
+    )
+
     data class SideConditionState(
         val type: SideCondition,
         val startTurn: Int,
@@ -93,7 +152,9 @@ object BattleStateTracker {
     private val playerSideConditions = ConcurrentHashMap<SideCondition, SideConditionState>()
     private val opponentSideConditions = ConcurrentHashMap<SideCondition, SideConditionState>()
     private val statChanges = ConcurrentHashMap<UUID, MutableMap<Stat, Int>>()
+    private val volatileStatuses = ConcurrentHashMap<UUID, MutableSet<VolatileStatusState>>()
     private val nameToUuid = ConcurrentHashMap<String, UUID>()
+    private val uuidIsAlly = ConcurrentHashMap<UUID, Boolean>()
 
     fun clear() {
         lastBattleId = null
@@ -104,7 +165,9 @@ object BattleStateTracker {
         playerSideConditions.clear()
         opponentSideConditions.clear()
         statChanges.clear()
+        volatileStatuses.clear()
         nameToUuid.clear()
+        uuidIsAlly.clear()
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared all state")
     }
 
@@ -251,22 +314,17 @@ object BattleStateTracker {
         return remaining.coerceAtLeast(1).toString()
     }
 
-    fun registerPokemon(uuid: UUID, name: String) {
+    fun registerPokemon(uuid: UUID, name: String, isAlly: Boolean) {
         nameToUuid[name.lowercase()] = uuid
+        uuidIsAlly[uuid] = isAlly
         statChanges.computeIfAbsent(uuid) { ConcurrentHashMap() }
+        volatileStatuses.computeIfAbsent(uuid) { ConcurrentHashMap.newKeySet() }
     }
 
+    fun isPokemonAlly(uuid: UUID): Boolean = uuidIsAlly[uuid] ?: false
+
     fun applyStatChange(pokemonName: String, statName: String, stages: Int) {
-        // Try direct lookup first
-        var uuid = nameToUuid[pokemonName.lowercase()]
-
-        // If not found, try stripping possessive prefix (e.g., "Player126's Tyranitar" -> "Tyranitar")
-        if (uuid == null && pokemonName.contains("'s ")) {
-            val strippedName = pokemonName.substringAfter("'s ").lowercase()
-            uuid = nameToUuid[strippedName]
-        }
-
-        if (uuid == null) {
+        val uuid = resolvePokemonUuid(pokemonName) ?: run {
             CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName'")
             return
         }
@@ -286,10 +344,100 @@ object BattleStateTracker {
 
     fun clearPokemonStats(uuid: UUID) {
         statChanges[uuid]?.clear()
-        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared stats for UUID $uuid")
+        volatileStatuses[uuid]?.clear()  // Volatiles also clear on switch
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared stats and volatiles for UUID $uuid")
     }
 
     fun clearPokemonStatsByName(pokemonName: String) {
+        val uuid = resolvePokemonUuid(pokemonName)
+        if (uuid != null) {
+            clearPokemonStats(uuid)
+        } else {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Could not find UUID for '$pokemonName' to clear stats")
+        }
+    }
+
+    fun getStatChanges(uuid: UUID): Map<Stat, Int> = statChanges[uuid] ?: emptyMap()
+
+    // Volatile status management
+    fun setVolatileStatus(pokemonName: String, type: VolatileStatus) {
+        val uuid = resolvePokemonUuid(pokemonName) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for volatile status")
+            return
+        }
+
+        val effectiveStartTurn = maxOf(1, currentTurn)
+        val statuses = volatileStatuses.computeIfAbsent(uuid) { ConcurrentHashMap.newKeySet() }
+
+        // Remove any existing status of the same type before adding (in case of refresh)
+        statuses.removeIf { it.type == type }
+        statuses.add(VolatileStatusState(type, effectiveStartTurn))
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName gained volatile ${type.displayName}")
+    }
+
+    fun clearVolatileStatus(pokemonName: String, type: VolatileStatus) {
+        val uuid = resolvePokemonUuid(pokemonName) ?: return
+        volatileStatuses[uuid]?.removeIf { it.type == type }
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName lost volatile ${type.displayName}")
+    }
+
+    fun clearPokemonVolatiles(uuid: UUID) {
+        volatileStatuses[uuid]?.clear()
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared volatiles for UUID $uuid")
+    }
+
+    fun clearPokemonVolatilesByName(pokemonName: String) {
+        val uuid = resolvePokemonUuid(pokemonName) ?: return
+        clearPokemonVolatiles(uuid)
+    }
+
+    fun getVolatileStatuses(uuid: UUID): Set<VolatileStatusState> =
+        volatileStatuses[uuid]?.toSet() ?: emptySet()
+
+    /**
+     * Get the turns remaining for a volatile status, or null if it has no duration.
+     * For countdown effects (like Perish Song), returns the countdown value (3, 2, 1).
+     * For other timed effects, returns turns remaining.
+     */
+    fun getVolatileTurnsRemaining(state: VolatileStatusState): String? {
+        val duration = state.type.baseDuration ?: return null
+        val turnsElapsed = currentTurn - state.startTurn
+
+        return if (state.type.countsDown) {
+            // Countdown display (e.g., Perish Song: 3, 2, 1)
+            val countdown = (duration - 1) - turnsElapsed  // -1 because it starts at 3, not 4
+            countdown.coerceAtLeast(0).toString()
+        } else {
+            // Turns remaining display
+            val remaining = duration - turnsElapsed
+            remaining.coerceAtLeast(1).toString()
+        }
+    }
+
+    /**
+     * Apply Perish Song to ALL registered Pokemon.
+     * Called when "cobblemon.battle.fieldactivate.perishsong" is detected.
+     */
+    fun applyPerishSongToAll() {
+        val effectiveStartTurn = maxOf(1, currentTurn)
+        var count = 0
+
+        // nameToUuid maps name -> UUID, so iterate over its values
+        for ((_, uuid) in nameToUuid) {
+            val statuses = volatileStatuses.computeIfAbsent(uuid) { ConcurrentHashMap.newKeySet() }
+
+            // Only add if not already affected
+            if (statuses.none { it.type == VolatileStatus.PERISH_SONG }) {
+                statuses.add(VolatileStatusState(VolatileStatus.PERISH_SONG, effectiveStartTurn))
+                count++
+            }
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Perish Song applied to $count Pokemon")
+    }
+
+    private fun resolvePokemonUuid(pokemonName: String): UUID? {
         // Try direct lookup first
         var uuid = nameToUuid[pokemonName.lowercase()]
 
@@ -299,14 +447,8 @@ object BattleStateTracker {
             uuid = nameToUuid[strippedName]
         }
 
-        if (uuid != null) {
-            clearPokemonStats(uuid)
-        } else {
-            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Could not find UUID for '$pokemonName' to clear stats")
-        }
+        return uuid
     }
-
-    fun getStatChanges(uuid: UUID): Map<Stat, Int> = statChanges[uuid] ?: emptyMap()
 
     private fun checkForExpiredConditions() {
         weather?.let { w ->

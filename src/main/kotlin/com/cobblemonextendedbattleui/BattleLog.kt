@@ -17,7 +17,8 @@ object BattleLog {
     enum class EntryType(val displayName: String, val icon: String) {
         TURN("Turn", ""),           // Turn markers (always shown)
         MOVE("Moves", "\u2694"),     // Move usage, effectiveness, crits, misses
-        HP("HP", "\u2665"),          // Damage, healing, faints
+        HP("HP", "\u2665"),          // Damage, faints
+        HEALING("Healing", "\u2764"), // HP recovery
         EFFECT("Effects", "\u2728"), // Stat changes, status, volatiles
         FIELD("Field", "\u2600"),    // Weather, terrain, screens, hazards
         OTHER("Other", "\u2022")     // Anything else
@@ -25,6 +26,7 @@ object BattleLog {
 
     /**
      * A single entry in the battle log.
+     * Includes cached wrapped lines for performance (computed lazily on first render).
      */
     data class LogEntry(
         val turn: Int,
@@ -32,7 +34,34 @@ object BattleLog {
         val message: Text,
         val translationKey: String?,
         val timestamp: Long = System.currentTimeMillis()
-    )
+    ) {
+        // Cached wrapped lines (computed once per width/scale combination)
+        @Volatile var cachedLines: List<String>? = null
+        @Volatile var cachedWidth: Int = 0
+        @Volatile var cachedScale: Float = 0f
+
+        /**
+         * Gets wrapped lines, using cache if parameters match.
+         */
+        fun getWrappedLines(width: Int, scale: Float, wrapFn: (String, Int, Float) -> List<String>): List<String> {
+            val cached = cachedLines
+            if (cached != null && cachedWidth == width && cachedScale == scale) {
+                return cached
+            }
+            val lines = wrapFn(message.string, width, scale)
+            cachedLines = lines
+            cachedWidth = width
+            cachedScale = scale
+            return lines
+        }
+
+        /**
+         * Invalidates the cache (call when font scale changes).
+         */
+        fun invalidateCache() {
+            cachedLines = null
+        }
+    }
 
     // Thread-safe list for log entries
     private val entries = CopyOnWriteArrayList<LogEntry>()
@@ -148,6 +177,19 @@ object BattleLog {
     }
 
     /**
+     * Add an HP change entry immediately.
+     * Called directly from DamageTracker when HP changes are detected.
+     */
+    fun addHpChangeEntry(text: String, isHealing: Boolean = false) {
+        addEntry(LogEntry(
+            turn = currentTurn,
+            type = if (isHealing) EntryType.HEALING else EntryType.HP,
+            message = Text.literal(text),
+            translationKey = null
+        ))
+    }
+
+    /**
      * Get all entries, optionally filtered by types.
      * @param activeFilters Set of EntryType to include. If empty or contains all types, returns everything.
      */
@@ -182,7 +224,17 @@ object BattleLog {
     fun clear() {
         entries.clear()
         currentTurn = 0
+        DamageTracker.clear()
         CobblemonExtendedBattleUI.LOGGER.debug("BattleLog: Cleared")
+    }
+
+    /**
+     * Invalidate all cached wrapped lines (call when font scale changes).
+     */
+    fun invalidateWrappedTextCache() {
+        for (entry in entries) {
+            entry.invalidateCache()
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -118,6 +118,97 @@ object BattleMessageInterceptor {
     private const val FAINT_KEY = "cobblemon.battle.faint"
     private const val SWITCH_KEY = "cobblemon.battle.switch"
     private const val DRAG_KEY = "cobblemon.battle.drag"  // Forced switch (e.g., Roar, Whirlwind)
+    private const val PERISH_SONG_FIELD_KEY = "cobblemon.battle.fieldactivate.perishsong"  // Applies to all Pokemon
+
+    /**
+     * Volatile status start keys - maps translation keys to VolatileStatus enum.
+     * These keys are verified from Cobblemon source: common/src/main/resources/assets/cobblemon/lang/en_us.json
+     */
+    private val VOLATILE_START_KEYS = mapOf(
+        // Seeding/Draining
+        "cobblemon.battle.start.leechseed" to BattleStateTracker.VolatileStatus.LEECH_SEED,
+
+        // Mental/Behavioral effects
+        "cobblemon.battle.start.confusion" to BattleStateTracker.VolatileStatus.CONFUSION,
+        "cobblemon.battle.start.taunt" to BattleStateTracker.VolatileStatus.TAUNT,
+        "cobblemon.battle.start.encore" to BattleStateTracker.VolatileStatus.ENCORE,
+        "cobblemon.battle.start.disable" to BattleStateTracker.VolatileStatus.DISABLE,
+        "cobblemon.battle.start.torment" to BattleStateTracker.VolatileStatus.TORMENT,
+        "cobblemon.battle.start.attract" to BattleStateTracker.VolatileStatus.INFATUATION,
+
+        // Countdown effects
+        "cobblemon.battle.start.perish" to BattleStateTracker.VolatileStatus.PERISH_SONG,
+        "cobblemon.battle.start.yawn" to BattleStateTracker.VolatileStatus.DROWSY,
+
+        // Damage over time
+        "cobblemon.battle.start.curse" to BattleStateTracker.VolatileStatus.CURSE,
+        "cobblemon.battle.start.nightmare" to BattleStateTracker.VolatileStatus.NIGHTMARE,
+
+        // Protection/Healing (positive)
+        "cobblemon.battle.start.substitute" to BattleStateTracker.VolatileStatus.SUBSTITUTE,
+        "cobblemon.battle.start.aquaring" to BattleStateTracker.VolatileStatus.AQUA_RING,
+        "cobblemon.battle.start.ingrain" to BattleStateTracker.VolatileStatus.INGRAIN,
+        "cobblemon.battle.start.focusenergy" to BattleStateTracker.VolatileStatus.FOCUS_ENERGY,
+        "cobblemon.battle.start.magnetrise" to BattleStateTracker.VolatileStatus.MAGNET_RISE,
+
+        // Prevention effects
+        "cobblemon.battle.start.embargo" to BattleStateTracker.VolatileStatus.EMBARGO,
+        "cobblemon.battle.start.healblock" to BattleStateTracker.VolatileStatus.HEAL_BLOCK
+    )
+
+    /**
+     * Volatile status activate keys - for trapping moves that use "activate" instead of "start".
+     * Verified from Cobblemon source.
+     */
+    private val VOLATILE_ACTIVATE_KEYS = mapOf(
+        // Trapping moves (all map to BOUND)
+        "cobblemon.battle.activate.bind" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.activate.wrap" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.activate.firespin" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.activate.whirlpool" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.activate.sandtomb" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.activate.clamp" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.activate.infestation" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.activate.magmastorm" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.activate.snaptrap" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.activate.thundercage" to BattleStateTracker.VolatileStatus.BOUND,
+
+        // Movement restriction
+        "cobblemon.battle.activate.trapped" to BattleStateTracker.VolatileStatus.TRAPPED
+    )
+
+    /**
+     * Volatile status end keys - verified from Cobblemon source.
+     */
+    private val VOLATILE_END_KEYS = mapOf(
+        // Seeding/Draining
+        "cobblemon.battle.end.leechseed" to BattleStateTracker.VolatileStatus.LEECH_SEED,
+
+        // Mental/Behavioral effects
+        "cobblemon.battle.end.confusion" to BattleStateTracker.VolatileStatus.CONFUSION,
+        "cobblemon.battle.end.taunt" to BattleStateTracker.VolatileStatus.TAUNT,
+        "cobblemon.battle.end.encore" to BattleStateTracker.VolatileStatus.ENCORE,
+        "cobblemon.battle.end.disable" to BattleStateTracker.VolatileStatus.DISABLE,
+        "cobblemon.battle.end.torment" to BattleStateTracker.VolatileStatus.TORMENT,
+        "cobblemon.battle.end.attract" to BattleStateTracker.VolatileStatus.INFATUATION,
+
+        // Protection/Healing
+        "cobblemon.battle.end.substitute" to BattleStateTracker.VolatileStatus.SUBSTITUTE,
+        "cobblemon.battle.end.magnetrise" to BattleStateTracker.VolatileStatus.MAGNET_RISE,
+
+        // Prevention effects
+        "cobblemon.battle.end.embargo" to BattleStateTracker.VolatileStatus.EMBARGO,
+        "cobblemon.battle.end.healblock" to BattleStateTracker.VolatileStatus.HEAL_BLOCK,
+
+        // Trapping moves (all clear BOUND)
+        "cobblemon.battle.end.bind" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.end.wrap" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.end.firespin" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.end.whirlpool" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.end.sandtomb" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.end.clamp" to BattleStateTracker.VolatileStatus.BOUND,
+        "cobblemon.battle.end.infestation" to BattleStateTracker.VolatileStatus.BOUND
+    )
 
     fun processMessages(messages: List<Text>) {
         for (message in messages) {
@@ -132,9 +223,9 @@ object BattleMessageInterceptor {
             val key = contents.key
             val args = contents.args
 
-            // Debug: Log all battle-related translation keys
+            // Debug: Log all battle-related translation keys (use DEBUG level for release)
             if (key.startsWith("cobblemon.battle.")) {
-                CobblemonExtendedBattleUI.LOGGER.info("BattleMessage: key='$key', args=${args.map {
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessage: key='$key', args=${args.map {
                     when (it) {
                         is Text -> it.string
                         else -> it.toString()
@@ -205,6 +296,30 @@ object BattleMessageInterceptor {
                 return
             }
 
+            // Handle volatile status start
+            VOLATILE_START_KEYS[key]?.let { volatileStatus ->
+                extractVolatileStatusStart(args, volatileStatus)
+                return
+            }
+
+            // Handle volatile status end
+            VOLATILE_END_KEYS[key]?.let { volatileStatus ->
+                extractVolatileStatusEnd(args, volatileStatus)
+                return
+            }
+
+            // Handle volatile status activate (trapping moves use "activate" instead of "start")
+            VOLATILE_ACTIVATE_KEYS[key]?.let { volatileStatus ->
+                extractVolatileStatusStart(args, volatileStatus)
+                return
+            }
+
+            // Handle Perish Song field effect - applies to ALL active Pokemon immediately
+            if (key == PERISH_SONG_FIELD_KEY) {
+                BattleStateTracker.applyPerishSongToAll()
+                return
+            }
+
             // Handle faint - clear stats for the fainted Pokemon
             if (key == FAINT_KEY) {
                 clearPokemonStats(args)
@@ -272,5 +387,37 @@ object BattleMessageInterceptor {
 
         CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Clearing stats for $pokemonName (faint/switch)")
         BattleStateTracker.clearPokemonStatsByName(pokemonName)
+    }
+
+    private fun extractVolatileStatusStart(args: Array<out Any>, volatileStatus: BattleStateTracker.VolatileStatus) {
+        if (args.isEmpty()) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: No args for volatile status start: ${volatileStatus.displayName}")
+            return
+        }
+
+        val pokemonName = when (val arg0 = args[0]) {
+            is Text -> arg0.string
+            is String -> arg0
+            else -> arg0.toString()
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Volatile start - $pokemonName gained ${volatileStatus.displayName}")
+        BattleStateTracker.setVolatileStatus(pokemonName, volatileStatus)
+    }
+
+    private fun extractVolatileStatusEnd(args: Array<out Any>, volatileStatus: BattleStateTracker.VolatileStatus) {
+        if (args.isEmpty()) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: No args for volatile status end: ${volatileStatus.displayName}")
+            return
+        }
+
+        val pokemonName = when (val arg0 = args[0]) {
+            is Text -> arg0.string
+            is String -> arg0
+            else -> arg0.toString()
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Volatile end - $pokemonName lost ${volatileStatus.displayName}")
+        BattleStateTracker.clearVolatileStatus(pokemonName, volatileStatus)
     }
 }

@@ -47,7 +47,7 @@ object BattleLogWidget {
     // Layout constants
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private const val HEADER_HEIGHT = 16
+    private const val HEADER_HEIGHT = 6  // Just enough for texture border, no actual header
     private const val COLLAPSED_HEIGHT = 70  // Small preset size
     private const val PADDING = 6
     private const val LOG_TEXT_INDENT = 4    // Extra indent for log entries
@@ -115,6 +115,18 @@ object BattleLogWidget {
     private var resizeStartHeight: Int = 0
     private var resizeStartPanelX: Int = 0
     private var resizeStartPanelY: Int = 0
+
+    // Scrollbar drag state
+    private var isDraggingScrollbar: Boolean = false
+    private var scrollbarDragStartY: Int = 0
+    private var scrollbarDragStartOffset: Int = 0
+
+    // Scrollbar bounds (updated during render)
+    private var scrollbarX: Int = 0
+    private var scrollbarY: Int = 0
+    private var scrollbarHeight: Int = 0
+    private var scrollbarThumbY: Int = 0
+    private var scrollbarThumbHeight: Int = 0
 
     // Hover state
     private var hoveredZone: UIUtils.ResizeZone = UIUtils.ResizeZone.NONE
@@ -382,7 +394,7 @@ object BattleLogWidget {
 
         // Only update hover state when this panel can interact
         val canInteract = UIUtils.canInteract(UIUtils.ActivePanel.BATTLE_LOG)
-        if (!isDragging && !isResizing && canInteract) {
+        if (!isDragging && !isResizing && !isDraggingScrollbar && canInteract) {
             hoveredZone = getResizeZone(mouseX, mouseY)
         } else if (!canInteract) {
             hoveredZone = UIUtils.ResizeZone.NONE
@@ -396,14 +408,41 @@ object BattleLogWidget {
         val isOverToggle = mouseX >= toggleZoneX && mouseX <= toggleZoneX + 14 &&
                            mouseY >= toggleZoneY && mouseY <= toggleZoneY + 12
 
+        // Check if mouse is over scrollbar (use wider hit area for easier clicking)
+        val scrollbarHitWidth = SCROLLBAR_WIDTH + 6
+        val isOverScrollbar = contentHeight > visibleHeight &&
+                              mouseX >= scrollbarX - 3 && mouseX <= scrollbarX + scrollbarHitWidth &&
+                              mouseY >= scrollbarY && mouseY <= scrollbarY + scrollbarHeight
+
         if (isMouseDown) {
             when {
+                // Continue scrollbar drag (check first to maintain drag even if mouse moves off)
+                isDraggingScrollbar -> {
+                    handleScrollbarDrag(mouseY)
+                }
                 // Toggle expand/collapse
                 !wasMousePressed && isOverToggle -> {
                     PanelConfig.setLogExpanded(!PanelConfig.logExpanded)
                     scrollOffset = 0
                     isFollowingBottom = true  // Reset to following on toggle
                     PanelConfig.save()
+                }
+                // Start scrollbar drag
+                !wasMousePressed && canInteract && isOverScrollbar -> {
+                    UIUtils.claimInteraction(UIUtils.ActivePanel.BATTLE_LOG)
+                    isDraggingScrollbar = true
+                    scrollbarDragStartY = mouseY
+                    scrollbarDragStartOffset = scrollOffset
+                    // If clicked on track (not thumb), jump to that position
+                    if (mouseY < scrollbarThumbY || mouseY > scrollbarThumbY + scrollbarThumbHeight) {
+                        // Click on track - jump thumb center to click position
+                        val trackClickRatio = (mouseY - scrollbarY).toFloat() / scrollbarHeight
+                        val maxScroll = (contentHeight - visibleHeight).coerceAtLeast(0)
+                        scrollOffset = (trackClickRatio * maxScroll).toInt().coerceIn(0, maxScroll)
+                        scrollbarDragStartY = mouseY
+                        scrollbarDragStartOffset = scrollOffset
+                    }
+                    isFollowingBottom = false
                 }
                 // Start resize
                 !wasMousePressed && canInteract && hoveredZone != UIUtils.ResizeZone.NONE -> {
@@ -437,16 +476,36 @@ object BattleLogWidget {
             }
         } else {
             // Release interaction when mouse is released
-            val wasInteracting = isDragging || isResizing
-            if (wasInteracting) {
+            val wasInteracting = isDragging || isResizing || isDraggingScrollbar
+            if (isDragging || isResizing) {
                 PanelConfig.save()
+            }
+            if (wasInteracting) {
                 UIUtils.releaseInteraction(UIUtils.ActivePanel.BATTLE_LOG)
             }
             isDragging = false
             isResizing = false
+            isDraggingScrollbar = false
         }
 
         wasMousePressed = isMouseDown
+    }
+
+    private fun handleScrollbarDrag(mouseY: Int) {
+        val deltaY = mouseY - scrollbarDragStartY
+        val maxScroll = (contentHeight - visibleHeight).coerceAtLeast(0)
+
+        if (maxScroll <= 0 || scrollbarHeight <= 0) return
+
+        // Convert pixel delta to scroll delta
+        val scrollableTrackHeight = scrollbarHeight - scrollbarThumbHeight
+        if (scrollableTrackHeight <= 0) return
+
+        val scrollDelta = (deltaY.toFloat() / scrollableTrackHeight * maxScroll).toInt()
+        scrollOffset = (scrollbarDragStartOffset + scrollDelta).coerceIn(0, maxScroll)
+
+        // Update follow state
+        isFollowingBottom = scrollOffset >= maxScroll - BOTTOM_THRESHOLD
     }
 
     private fun handleFontKeybinds(handle: Long) {
@@ -485,20 +544,29 @@ object BattleLogWidget {
         val w = widgetW
         val h = widgetH
 
+        // Exclude scrollbar area from resize detection (right side, inside content area)
+        // This prevents the scrollbar from being impossible to click
+        val scrollbarX = x + w - SCROLLBAR_WIDTH - 6
+        val contentTop = y + HEADER_HEIGHT
+        val contentBottom = y + h - 14  // Bottom arrow area
+        val isOverScrollbarArea = mouseX >= scrollbarX && mouseX <= x + w - 3 &&
+                                   mouseY >= contentTop && mouseY <= contentBottom
+        if (isOverScrollbarArea) return UIUtils.ResizeZone.NONE
+
         // Corner detection zones (L-shaped areas around corners)
-        val cornerSize = 15  // Size of the corner detection zone
+        val cornerSize = 12  // Size of the corner detection zone
 
         val nearLeft = mouseX >= x - RESIZE_HANDLE_SIZE && mouseX <= x + cornerSize
         val nearRight = mouseX >= x + w - cornerSize && mouseX <= x + w + RESIZE_HANDLE_SIZE
-        val nearTop = mouseY >= y - RESIZE_HANDLE_SIZE && mouseY <= y + cornerSize
+        val nearTop = mouseY >= y - RESIZE_HANDLE_SIZE && mouseY <= y + 4  // Reduced top zone - only outside/just inside
         val nearBottom = mouseY >= y + h - cornerSize && mouseY <= y + h + RESIZE_HANDLE_SIZE
 
-        // Edge detection (middle portions of edges)
-        val edgeZone = 8  // How close to edge to trigger
-        val onLeftEdge = mouseX >= x - edgeZone && mouseX <= x + edgeZone
-        val onRightEdge = mouseX >= x + w - edgeZone && mouseX <= x + w + edgeZone
-        val onTopEdge = mouseY >= y - edgeZone && mouseY <= y + edgeZone
-        val onBottomEdge = mouseY >= y + h - edgeZone && mouseY <= y + h + edgeZone
+        // Edge detection (middle portions of edges, outside the widget)
+        val edgeZone = 5  // How close to edge to trigger - reduced for less sensitivity
+        val onLeftEdge = mouseX >= x - edgeZone && mouseX <= x + 2
+        val onRightEdge = mouseX >= x + w - 2 && mouseX <= x + w + edgeZone
+        val onTopEdge = mouseY >= y - edgeZone && mouseY <= y + 2  // Reduced - mostly outside
+        val onBottomEdge = mouseY >= y + h - 2 && mouseY <= y + h + edgeZone
 
         val withinX = mouseX >= x - RESIZE_HANDLE_SIZE && mouseX <= x + w + RESIZE_HANDLE_SIZE
         val withinY = mouseY >= y - RESIZE_HANDLE_SIZE && mouseY <= y + h + RESIZE_HANDLE_SIZE
@@ -510,7 +578,7 @@ object BattleLogWidget {
             nearBottom && nearLeft -> UIUtils.ResizeZone.BOTTOM_LEFT
             nearBottom && nearRight -> UIUtils.ResizeZone.BOTTOM_RIGHT
 
-            // Edges (only the middle portions)
+            // Edges (only the outer edge portions)
             onLeftEdge && withinY && !nearTop && !nearBottom -> UIUtils.ResizeZone.LEFT
             onRightEdge && withinY && !nearTop && !nearBottom -> UIUtils.ResizeZone.RIGHT
             onTopEdge && withinX && !nearLeft && !nearRight -> UIUtils.ResizeZone.TOP
@@ -639,7 +707,7 @@ object BattleLogWidget {
 
     private fun renderContent(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
         // Content area (leave space at bottom for texture's built-in arrow area)
-        val contentY = y + HEADER_HEIGHT + 2
+        val contentY = y + HEADER_HEIGHT
         val contentAreaHeight = height - HEADER_HEIGHT - 14  // Space at bottom for arrow region
 
         // Calculate text width (assume scrollbar present for height calc to avoid circular dependency)
@@ -839,6 +907,11 @@ object BattleLogWidget {
         RenderSystem.enableBlend()
         RenderSystem.defaultBlendFunc()
 
+        // Store bounds for click detection
+        scrollbarX = x
+        scrollbarY = y
+        scrollbarHeight = height
+
         // Background track
         context.fill(x, y, x + SCROLLBAR_WIDTH, y + height, SCROLLBAR_BG)
 
@@ -847,6 +920,10 @@ object BattleLogWidget {
         val maxScroll = contentHeight - visibleHeight
         val ratio = if (maxScroll > 0) scrollOffset.toFloat() / maxScroll else 0f
         val thumbY = y + ((height - thumbHeight) * ratio).toInt()
+
+        // Store thumb bounds for click detection
+        scrollbarThumbY = thumbY
+        scrollbarThumbHeight = thumbHeight
 
         context.fill(x, thumbY, x + SCROLLBAR_WIDTH, thumbY + thumbHeight, SCROLLBAR_THUMB)
     }

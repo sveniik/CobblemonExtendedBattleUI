@@ -435,7 +435,18 @@ object BattleInfoPanel {
         val screenHeight = mc.window.scaledHeight
 
         val playerUUID = mc.player?.uuid ?: return
-        val playerSide = if (battle.side1.actors.any { it.uuid == playerUUID }) battle.side1 else battle.side2
+
+        // Determine if player is in the battle and which side they're on
+        val playerInSide1 = battle.side1.actors.any { it.uuid == playerUUID }
+        val playerInSide2 = battle.side2.actors.any { it.uuid == playerUUID }
+        val isSpectating = !playerInSide1 && !playerInSide2
+
+        // Determine player/opponent sides (or left/right when spectating)
+        val playerSide = when {
+            playerInSide1 -> battle.side1
+            playerInSide2 -> battle.side2
+            else -> battle.side1  // When spectating, treat side1 as "left" side
+        }
         val opponentSide = if (playerSide == battle.side1) battle.side2 else battle.side1
 
         // Get ally and opponent Pokemon separately

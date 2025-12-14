@@ -238,68 +238,93 @@ object UIUtils {
         var newX = startX
         var newY = startY
 
+        // Calculate the fixed edges (the edges that should NOT move during resize)
+        val fixedRight = startX + startWidth  // For left-side resizing
+        val fixedBottom = startY + startHeight  // For top-side resizing
+        val fixedLeft = startX  // For right-side resizing
+        val fixedTop = startY  // For bottom-side resizing
+
         when (zone) {
-            ResizeZone.RIGHT -> newWidth = startWidth + deltaX
-            ResizeZone.BOTTOM -> newHeight = startHeight + deltaY
+            ResizeZone.RIGHT -> {
+                // Right edge moves, left edge stays fixed
+                newWidth = (startWidth + deltaX).coerceIn(minWidth, maxWidth)
+                // Don't let it go past screen edge
+                val maxAllowedWidth = screenWidth - fixedLeft
+                newWidth = newWidth.coerceAtMost(maxAllowedWidth)
+            }
+            ResizeZone.BOTTOM -> {
+                // Bottom edge moves, top edge stays fixed
+                newHeight = (startHeight + deltaY).coerceIn(minHeight, maxHeight)
+                val maxAllowedHeight = screenHeight - fixedTop
+                newHeight = newHeight.coerceAtMost(maxAllowedHeight)
+            }
             ResizeZone.BOTTOM_RIGHT -> {
-                newWidth = startWidth + deltaX
-                newHeight = startHeight + deltaY
+                newWidth = (startWidth + deltaX).coerceIn(minWidth, maxWidth)
+                newHeight = (startHeight + deltaY).coerceIn(minHeight, maxHeight)
+                val maxAllowedWidth = screenWidth - fixedLeft
+                val maxAllowedHeight = screenHeight - fixedTop
+                newWidth = newWidth.coerceAtMost(maxAllowedWidth)
+                newHeight = newHeight.coerceAtMost(maxAllowedHeight)
             }
             ResizeZone.LEFT -> {
-                newWidth = startWidth - deltaX
-                newX = startX + deltaX
+                // Left edge moves, right edge stays fixed
+                newWidth = (startWidth - deltaX).coerceIn(minWidth, maxWidth)
+                newX = fixedRight - newWidth
+                // Don't let left edge go past screen left
+                if (newX < 0) {
+                    newX = 0
+                    newWidth = fixedRight  // Can only be as wide as distance to right edge
+                    newWidth = newWidth.coerceIn(minWidth, maxWidth)
+                }
             }
             ResizeZone.TOP -> {
-                newHeight = startHeight - deltaY
-                newY = startY + deltaY
+                // Top edge moves, bottom edge stays fixed
+                newHeight = (startHeight - deltaY).coerceIn(minHeight, maxHeight)
+                newY = fixedBottom - newHeight
+                if (newY < 0) {
+                    newY = 0
+                    newHeight = fixedBottom
+                    newHeight = newHeight.coerceIn(minHeight, maxHeight)
+                }
             }
             ResizeZone.TOP_LEFT -> {
-                newWidth = startWidth - deltaX
-                newHeight = startHeight - deltaY
-                newX = startX + deltaX
-                newY = startY + deltaY
+                newWidth = (startWidth - deltaX).coerceIn(minWidth, maxWidth)
+                newHeight = (startHeight - deltaY).coerceIn(minHeight, maxHeight)
+                newX = fixedRight - newWidth
+                newY = fixedBottom - newHeight
+                if (newX < 0) {
+                    newX = 0
+                    newWidth = fixedRight.coerceIn(minWidth, maxWidth)
+                }
+                if (newY < 0) {
+                    newY = 0
+                    newHeight = fixedBottom.coerceIn(minHeight, maxHeight)
+                }
             }
             ResizeZone.TOP_RIGHT -> {
-                newWidth = startWidth + deltaX
-                newHeight = startHeight - deltaY
-                newY = startY + deltaY
+                newWidth = (startWidth + deltaX).coerceIn(minWidth, maxWidth)
+                newHeight = (startHeight - deltaY).coerceIn(minHeight, maxHeight)
+                newY = fixedBottom - newHeight
+                val maxAllowedWidth = screenWidth - fixedLeft
+                newWidth = newWidth.coerceAtMost(maxAllowedWidth)
+                if (newY < 0) {
+                    newY = 0
+                    newHeight = fixedBottom.coerceIn(minHeight, maxHeight)
+                }
             }
             ResizeZone.BOTTOM_LEFT -> {
-                newWidth = startWidth - deltaX
-                newHeight = startHeight + deltaY
-                newX = startX + deltaX
+                newWidth = (startWidth - deltaX).coerceIn(minWidth, maxWidth)
+                newHeight = (startHeight + deltaY).coerceIn(minHeight, maxHeight)
+                newX = fixedRight - newWidth
+                val maxAllowedHeight = screenHeight - fixedTop
+                newHeight = newHeight.coerceAtMost(maxAllowedHeight)
+                if (newX < 0) {
+                    newX = 0
+                    newWidth = fixedRight.coerceIn(minWidth, maxWidth)
+                }
             }
             ResizeZone.NONE -> {}
         }
-
-        // When resizing from left/top edges, we need to fix position when hitting limits
-        // to prevent the panel from moving when it can't resize further
-        if (zone in listOf(ResizeZone.LEFT, ResizeZone.TOP_LEFT, ResizeZone.BOTTOM_LEFT)) {
-            if (newWidth < minWidth) {
-                newX = startX + startWidth - minWidth
-                newWidth = minWidth
-            }
-            if (newWidth > maxWidth) {
-                newX = startX + startWidth - maxWidth
-                newWidth = maxWidth
-            }
-        }
-        if (zone in listOf(ResizeZone.TOP, ResizeZone.TOP_LEFT, ResizeZone.TOP_RIGHT)) {
-            if (newHeight < minHeight) {
-                newY = startY + startHeight - minHeight
-                newHeight = minHeight
-            }
-            if (newHeight > maxHeight) {
-                newY = startY + startHeight - maxHeight
-                newHeight = maxHeight
-            }
-        }
-
-        // Apply final constraints
-        newWidth = newWidth.coerceIn(minWidth, maxWidth)
-        newHeight = newHeight.coerceIn(minHeight, maxHeight)
-        newX = newX.coerceIn(0, screenWidth - newWidth)
-        newY = newY.coerceIn(0, screenHeight - newHeight)
 
         return ResizeResult(newX, newY, newWidth, newHeight)
     }

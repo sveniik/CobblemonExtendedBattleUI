@@ -4,6 +4,7 @@ import com.cobblemon.mod.common.api.pokemon.status.Statuses
 import com.cobblemon.mod.common.api.pokemon.status.Status
 import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.battle.ClientBattlePokemon
+import com.cobblemon.mod.common.client.battle.ClientBattleSide
 import com.cobblemon.mod.common.pokemon.Pokemon
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
@@ -13,6 +14,10 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Displays pokeball indicators for each team's Pokemon.
  * Shows status conditions and KO'd Pokemon at a glance.
+ *
+ * Supports both participating in battles and spectating:
+ * - When in battle: Uses client party storage for player's team, tracks opponent via battle data
+ * - When spectating: Uses battle data to track both sides as Pokemon are revealed
  */
 object TeamIndicatorUI {
 
@@ -50,7 +55,7 @@ object TeamIndicatorUI {
 
     private fun color(r: Int, g: Int, b: Int, a: Int = 255): Int = (a shl 24) or (r shl 16) or (g shl 8) or b
 
-    // Track opponent Pokemon as they're revealed
+    // Track Pokemon as they're revealed in battle
     data class TrackedPokemon(
         val uuid: UUID,
         var hpPercent: Float,  // 0.0 to 1.0
@@ -58,14 +63,22 @@ object TeamIndicatorUI {
         var isKO: Boolean
     )
 
-    private val trackedOpponentPokemon = ConcurrentHashMap<UUID, TrackedPokemon>()
+    // Track Pokemon for both sides separately (for spectating support)
+    private val trackedSide1Pokemon = ConcurrentHashMap<UUID, TrackedPokemon>()
+    private val trackedSide2Pokemon = ConcurrentHashMap<UUID, TrackedPokemon>()
+
+    // Also track by UUID for cross-referencing with player party
+    private val allTrackedPokemon = ConcurrentHashMap<UUID, TrackedPokemon>()
+
     private var lastBattleId: UUID? = null
 
     /**
      * Clear tracking when battle ends.
      */
     fun clear() {
-        trackedOpponentPokemon.clear()
+        trackedSide1Pokemon.clear()
+        trackedSide2Pokemon.clear()
+        allTrackedPokemon.clear()
         lastBattleId = null
     }
 
@@ -84,39 +97,75 @@ object TeamIndicatorUI {
         val player = mc.player ?: return
         val playerUUID = player.uuid
 
-        // Determine player and opponent sides
-        val playerSide = if (battle.side1.actors.any { it.uuid == playerUUID }) battle.side1 else battle.side2
-        val opponentSide = if (playerSide == battle.side1) battle.side2 else battle.side1
+        // Determine if player is in the battle and which side they're on
+        val playerInSide1 = battle.side1.actors.any { it.uuid == playerUUID }
+        val playerInSide2 = battle.side2.actors.any { it.uuid == playerUUID }
+        val isSpectating = !playerInSide1 && !playerInSide2
+
+        // Determine left/right sides based on player position or default for spectating
+        val leftSide: ClientBattleSide
+        val rightSide: ClientBattleSide
+        val leftTracked: ConcurrentHashMap<UUID, TrackedPokemon>
+        val rightTracked: ConcurrentHashMap<UUID, TrackedPokemon>
+
+        if (playerInSide1) {
+            leftSide = battle.side1
+            rightSide = battle.side2
+            leftTracked = trackedSide1Pokemon
+            rightTracked = trackedSide2Pokemon
+        } else {
+            // Player is on side2, or spectating (default to side1 on left)
+            leftSide = if (isSpectating) battle.side1 else battle.side2
+            rightSide = if (isSpectating) battle.side2 else battle.side1
+            leftTracked = if (isSpectating) trackedSide1Pokemon else trackedSide2Pokemon
+            rightTracked = if (isSpectating) trackedSide2Pokemon else trackedSide1Pokemon
+        }
+
+        // Update tracked Pokemon for both sides from battle data
+        updateTrackedPokemonForSide(leftSide, leftTracked)
+        updateTrackedPokemonForSide(rightSide, rightTracked)
 
         // Count active Pokemon for positioning (determines how many tiles are shown)
-        val playerActiveCount = playerSide.actors.sumOf { it.activePokemon.size }
-        val opponentActiveCount = opponentSide.actors.sumOf { it.activePokemon.size }
+        val leftActiveCount = leftSide.actors.sumOf { it.activePokemon.size }
+        val rightActiveCount = rightSide.actors.sumOf { it.activePokemon.size }
 
-        // Get player's team from client storage (full party)
-        val playerParty = CobblemonClient.storage.party
-        val playerTeam = playerParty.slots.filterNotNull()
+        val leftY = calculatePokeballY(leftActiveCount)
+        val rightY = calculatePokeballY(rightActiveCount)
 
-        // Update tracked opponent Pokemon from active Pokemon
-        for (actor in opponentSide.actors) {
-            for (activePokemon in actor.activePokemon) {
-                val battlePokemon = activePokemon.battlePokemon ?: continue
-                updateTrackedPokemon(battlePokemon)
+        // Render left side (player's side when in battle, side1 when spectating)
+        if (!isSpectating) {
+            // Player is in battle - use client storage for full party view,
+            // but cross-reference with battle data for accurate HP/status
+            val playerParty = CobblemonClient.storage.party
+            val playerTeam = playerParty.slots.filterNotNull()
+            renderPlayerTeamWithBattleData(context, HORIZONTAL_INSET, leftY, playerTeam)
+        } else {
+            // Spectating - use tracked Pokemon from battle data
+            val leftTeam = leftTracked.values.toList()
+            if (leftTeam.isNotEmpty()) {
+                renderTrackedTeam(context, HORIZONTAL_INSET, leftY, leftTeam)
             }
         }
 
-        // Get tracked opponent Pokemon as a list (in order they were seen)
-        val opponentTeam = trackedOpponentPokemon.values.toList()
+        // Render right side (always use tracked data from battle)
+        val rightTeam = rightTracked.values.toList()
+        if (rightTeam.isNotEmpty()) {
+            val rightWidth = rightTeam.size * (BALL_SIZE + BALL_SPACING) - BALL_SPACING
+            renderTrackedTeam(context, screenWidth - HORIZONTAL_INSET - rightWidth, rightY, rightTeam)
+        }
+    }
 
-        val playerY = calculatePokeballY(playerActiveCount)
-        val opponentY = calculatePokeballY(opponentActiveCount)
-
-        // Render player team (left side, under player tiles)
-        renderPlayerTeam(context, HORIZONTAL_INSET, playerY, playerTeam)
-
-        // Render opponent team (right side, under opponent tiles)
-        if (opponentTeam.isNotEmpty()) {
-            val opponentWidth = opponentTeam.size * (BALL_SIZE + BALL_SPACING) - BALL_SPACING
-            renderOpponentTeam(context, screenWidth - HORIZONTAL_INSET - opponentWidth, opponentY, opponentTeam)
+    /**
+     * Update tracked Pokemon for a battle side.
+     */
+    private fun updateTrackedPokemonForSide(side: ClientBattleSide, tracked: ConcurrentHashMap<UUID, TrackedPokemon>) {
+        for (actor in side.actors) {
+            for (activePokemon in actor.activePokemon) {
+                val battlePokemon = activePokemon.battlePokemon ?: continue
+                updateTrackedPokemonInMap(battlePokemon, tracked)
+                // Also update the global map for cross-referencing
+                updateTrackedPokemonInMap(battlePokemon, allTrackedPokemon)
+            }
         }
     }
 
@@ -127,22 +176,29 @@ object TeamIndicatorUI {
         val isCompact = activeCount >= 3
         val tileHeight = if (isCompact) COMPACT_TILE_HEIGHT else TILE_HEIGHT
 
-        // Visual tile stacking appears much tighter than the VERTICAL_SPACING constants
-        // These values are empirically adjusted based on in-game testing
-        val effectiveSpacing = if (isCompact) 20 else 15
+        // Visual tile stacking - empirically adjusted based on in-game testing
+        // Singles/Doubles: tiles are spaced 15px apart
+        // Triples+: tiles use compact mode with tighter spacing, but need more total space
+        val effectiveSpacing = when {
+            activeCount >= 3 -> 30  // Triple battles need more spacing to clear all tiles
+            else -> 15              // Singles and doubles
+        }
 
         val bottomOfTiles = VERTICAL_INSET + (activeCount - 1) * effectiveSpacing + tileHeight
 
         return bottomOfTiles + BALL_OFFSET_Y
     }
 
-    private fun updateTrackedPokemon(battlePokemon: ClientBattlePokemon) {
+    /**
+     * Update tracked Pokemon in the specified map.
+     */
+    private fun updateTrackedPokemonInMap(battlePokemon: ClientBattlePokemon, targetMap: ConcurrentHashMap<UUID, TrackedPokemon>) {
         val uuid = battlePokemon.uuid
         val hpPercent = if (battlePokemon.maxHp > 0) battlePokemon.hpValue / battlePokemon.maxHp else 0f
         val isKO = battlePokemon.hpValue <= 0
         val status = battlePokemon.status
 
-        trackedOpponentPokemon.compute(uuid) { _, existing ->
+        targetMap.compute(uuid) { _, existing ->
             if (existing != null) {
                 // Update existing
                 existing.hpPercent = hpPercent
@@ -156,12 +212,29 @@ object TeamIndicatorUI {
         }
     }
 
-    private fun renderPlayerTeam(context: DrawContext, startX: Int, startY: Int, team: List<Pokemon>) {
+    /**
+     * Render player team using client party data, but cross-reference with battle data
+     * for more accurate HP/status information during battle.
+     */
+    private fun renderPlayerTeamWithBattleData(context: DrawContext, startX: Int, startY: Int, team: List<Pokemon>) {
         var x = startX
 
         for (pokemon in team) {
-            val isKO = pokemon.currentHealth <= 0
-            val status = pokemon.status?.status
+            // Try to get battle data for this Pokemon for more accurate HP/status
+            val battleData = allTrackedPokemon[pokemon.uuid]
+
+            val isKO: Boolean
+            val status: Status?
+
+            if (battleData != null) {
+                // Use battle data (more accurate during battle)
+                isKO = battleData.isKO
+                status = battleData.status
+            } else {
+                // Fall back to party data (Pokemon hasn't been in battle yet, or no battle data)
+                isKO = pokemon.currentHealth <= 0
+                status = pokemon.status?.status
+            }
 
             val (topColor, bottomColor, bandColor, centerColor) = when {
                 isKO -> Quad(COLOR_KO_TOP, COLOR_KO_BOTTOM, COLOR_KO_BAND, COLOR_KO_CENTER)
@@ -177,7 +250,10 @@ object TeamIndicatorUI {
         }
     }
 
-    private fun renderOpponentTeam(context: DrawContext, startX: Int, startY: Int, team: List<TrackedPokemon>) {
+    /**
+     * Render a team using tracked battle data (used for opponent team and when spectating).
+     */
+    private fun renderTrackedTeam(context: DrawContext, startX: Int, startY: Int, team: List<TrackedPokemon>) {
         var x = startX
 
         for (pokemon in team) {

@@ -4,21 +4,67 @@ import net.minecraft.text.Text
 import net.minecraft.text.TranslatableTextContent
 
 /**
- * Intercepts battle messages and updates BattleStateTracker.
+ * Parses Cobblemon battle messages (via TranslatableTextContent) and updates BattleStateTracker.
  */
 object BattleMessageInterceptor {
 
-    private val BOOST_KEYS = mapOf(
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Stat Boost/Unboost Keys
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Boost magnitude keys - the stat name comes from args, not the key
+    private val BOOST_MAGNITUDE_KEYS = mapOf(
         "cobblemon.battle.boost.slight" to 1,
         "cobblemon.battle.boost.sharp" to 2,
-        "cobblemon.battle.boost.severe" to 3
+        "cobblemon.battle.boost.severe" to 3,
+        "cobblemon.battle.boost.slight.zeffect" to 1,
+        "cobblemon.battle.boost.sharp.zeffect" to 2,
+        "cobblemon.battle.boost.severe.zeffect" to 3
     )
 
-    private val UNBOOST_KEYS = mapOf(
-        "cobblemon.battle.unboost.slight" to -1,
-        "cobblemon.battle.unboost.sharp" to -2,
-        "cobblemon.battle.unboost.severe" to -3
+    private val UNBOOST_MAGNITUDE_KEYS = mapOf(
+        "cobblemon.battle.unboost.slight" to 1,
+        "cobblemon.battle.unboost.sharp" to 2,
+        "cobblemon.battle.unboost.severe" to 3
     )
+
+    // Maps displayed stat names to BattleStat enum
+    private val STAT_NAME_MAPPING = mapOf(
+        "attack" to BattleStateTracker.BattleStat.ATTACK,
+        "defense" to BattleStateTracker.BattleStat.DEFENSE,
+        "defence" to BattleStateTracker.BattleStat.DEFENSE,
+        "special attack" to BattleStateTracker.BattleStat.SPECIAL_ATTACK,
+        "sp. atk" to BattleStateTracker.BattleStat.SPECIAL_ATTACK,
+        "special defense" to BattleStateTracker.BattleStat.SPECIAL_DEFENSE,
+        "special defence" to BattleStateTracker.BattleStat.SPECIAL_DEFENSE,
+        "sp. def" to BattleStateTracker.BattleStat.SPECIAL_DEFENSE,
+        "speed" to BattleStateTracker.BattleStat.SPEED,
+        "accuracy" to BattleStateTracker.BattleStat.ACCURACY,
+        "evasion" to BattleStateTracker.BattleStat.EVASION,
+        "evasiveness" to BattleStateTracker.BattleStat.EVASION
+    )
+
+    // Track last move user and target for moves that don't specify target in swap messages
+    private var lastMoveUser: String? = null
+    private var lastMoveTarget: String? = null
+    private var lastMoveName: String? = null
+
+    /**
+     * Clear stale move tracking data. Called when battle state is cleared.
+     */
+    fun clearMoveTracking() {
+        lastMoveUser = null
+        lastMoveTarget = null
+        lastMoveName = null
+    }
+
+    // Move names that require special handling (case-insensitive matching)
+    private const val BATON_PASS = "baton pass"
+    private const val SPECTRAL_THIEF = "spectral thief"
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Weather, Terrain, Field, Side Condition Keys
+    // ═══════════════════════════════════════════════════════════════════════════
 
     private val WEATHER_START_KEYS = mapOf(
         "cobblemon.battle.weather.raindance.start" to BattleStateTracker.Weather.RAIN,
@@ -120,10 +166,7 @@ object BattleMessageInterceptor {
     private const val DRAG_KEY = "cobblemon.battle.drag"  // Forced switch (e.g., Roar, Whirlwind)
     private const val PERISH_SONG_FIELD_KEY = "cobblemon.battle.fieldactivate.perishsong"  // Applies to all Pokemon
 
-    /**
-     * Volatile status start keys - maps translation keys to VolatileStatus enum.
-     * These keys are verified from Cobblemon source: common/src/main/resources/assets/cobblemon/lang/en_us.json
-     */
+    // Volatile status start keys
     private val VOLATILE_START_KEYS = mapOf(
         // Seeding/Draining
         "cobblemon.battle.start.leechseed" to BattleStateTracker.VolatileStatus.LEECH_SEED,
@@ -156,10 +199,7 @@ object BattleMessageInterceptor {
         "cobblemon.battle.start.healblock" to BattleStateTracker.VolatileStatus.HEAL_BLOCK
     )
 
-    /**
-     * Volatile status activate keys - for trapping moves that use "activate" instead of "start".
-     * Verified from Cobblemon source.
-     */
+    // Volatile status activate keys (trapping moves use "activate" instead of "start")
     private val VOLATILE_ACTIVATE_KEYS = mapOf(
         // Trapping moves (all map to BOUND)
         "cobblemon.battle.activate.bind" to BattleStateTracker.VolatileStatus.BOUND,
@@ -177,9 +217,7 @@ object BattleMessageInterceptor {
         "cobblemon.battle.activate.trapped" to BattleStateTracker.VolatileStatus.TRAPPED
     )
 
-    /**
-     * Volatile status end keys - verified from Cobblemon source.
-     */
+    // Volatile status end keys
     private val VOLATILE_END_KEYS = mapOf(
         // Seeding/Draining
         "cobblemon.battle.end.leechseed" to BattleStateTracker.VolatileStatus.LEECH_SEED,
@@ -223,7 +261,6 @@ object BattleMessageInterceptor {
             val key = contents.key
             val args = contents.args
 
-            // Debug: Log all battle-related translation keys (use DEBUG level for release)
             if (key.startsWith("cobblemon.battle.")) {
                 CobblemonExtendedBattleUI.LOGGER.debug("BattleMessage: key='$key', args=${args.map {
                     when (it) {
@@ -238,22 +275,104 @@ object BattleMessageInterceptor {
                 return
             }
 
-            BOOST_KEYS[key]?.let { stages ->
-                extractStatChange(args, stages)
-                return
-            }
+            // Track move usage with target for later use by swap moves and special move handling
+            // "used_move_on" has args: [user, moveName, target]
+            if (key == "cobblemon.battle.used_move_on" && args.size >= 3) {
+                lastMoveUser = argToString(args[0])
+                lastMoveName = argToString(args[1])
+                lastMoveTarget = argToString(args[2])
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Move tracked - $lastMoveUser used $lastMoveName on $lastMoveTarget")
 
-            UNBOOST_KEYS[key]?.let { stages ->
-                extractStatChange(args, stages)
-                return
-            }
-
-            if (key.startsWith("cobblemon.battle.boost.") && key.endsWith(".zeffect")) {
-                val baseKey = key.removeSuffix(".zeffect")
-                BOOST_KEYS[baseKey]?.let { stages ->
-                    extractStatChange(args, stages)
-                    return
+                // Handle Spectral Thief: steal positive stat boosts from target
+                if (lastMoveName?.lowercase() == SPECTRAL_THIEF) {
+                    BattleStateTracker.stealPositiveStats(lastMoveUser!!, lastMoveTarget!!)
                 }
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Track move usage without target (self-targeting moves like Baton Pass)
+            // "used_move" has args: [user, moveName]
+            if (key == "cobblemon.battle.used_move" && args.size >= 2) {
+                lastMoveUser = argToString(args[0])
+                lastMoveName = argToString(args[1])
+                lastMoveTarget = null
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Self-move tracked - $lastMoveUser used $lastMoveName")
+
+                // Handle Baton Pass: mark the user so stats transfer on switch
+                if (lastMoveName?.lowercase() == BATON_PASS) {
+                    BattleStateTracker.markBatonPassUsed(lastMoveUser!!)
+                }
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Stat boost messages: cobblemon.battle.boost.{slight|sharp|severe}
+            // Args: [pokemonName, statName]
+            BOOST_MAGNITUDE_KEYS[key]?.let { stages ->
+                extractBoost(args, stages)
+                return
+            }
+
+            // Stat unboost messages: cobblemon.battle.unboost.{slight|sharp|severe}
+            // Args: [pokemonName, statName]
+            UNBOOST_MAGNITUDE_KEYS[key]?.let { stages ->
+                extractBoost(args, -stages)
+                return
+            }
+
+            // Set boost: cobblemon.battle.setboost.bellydrum or cobblemon.battle.setboost.angerpoint
+            // Args: [pokemonName] - sets Attack to +6
+            if (key == "cobblemon.battle.setboost.bellydrum" || key == "cobblemon.battle.setboost.angerpoint") {
+                extractSetBoost(args)
+                return
+            }
+
+            // Clear all boosts: cobblemon.battle.clearallboost (Haze - clears all stats for all Pokemon)
+            if (key == "cobblemon.battle.clearallboost") {
+                BattleStateTracker.clearAllStatsForAll()
+                return
+            }
+
+            // Clear boost for one Pokemon: cobblemon.battle.clearboost
+            // Args: [pokemonName]
+            if (key == "cobblemon.battle.clearboost") {
+                extractClearBoost(args)
+                return
+            }
+
+            // Invert boost: cobblemon.battle.invertboost (Topsy-Turvy)
+            // Args: [pokemonName]
+            if (key == "cobblemon.battle.invertboost") {
+                extractInvertBoost(args)
+                return
+            }
+
+            // Swap boost: cobblemon.battle.swapboost.heartswap or cobblemon.battle.swapboost.generic
+            // Heart Swap swaps ALL stat changes
+            // heartswap only has 1 arg (user), generic has 2 args (user, target)
+            if (key == "cobblemon.battle.swapboost.heartswap" || key == "cobblemon.battle.swapboost.generic") {
+                extractSwapBoostAllStats(args)
+                return
+            }
+
+            // Power/Guard/Speed Swap: single arg, uses lastMoveTarget
+            if (key == "cobblemon.battle.swapboost.powerswap") {
+                extractSwapBoostSpecific(args, listOf(BattleStateTracker.BattleStat.ATTACK, BattleStateTracker.BattleStat.SPECIAL_ATTACK))
+                return
+            }
+            if (key == "cobblemon.battle.swapboost.guardswap") {
+                extractSwapBoostSpecific(args, listOf(BattleStateTracker.BattleStat.DEFENSE, BattleStateTracker.BattleStat.SPECIAL_DEFENSE))
+                return
+            }
+            if (key == "cobblemon.battle.activate.speedswap") {
+                extractSwapBoostSpecific(args, listOf(BattleStateTracker.BattleStat.SPEED))
+                return
+            }
+
+            // Copy boost: cobblemon.battle.copyboost.generic (Psych Up)
+            // Args: [copier, source]
+            if (key == "cobblemon.battle.copyboost.generic") {
+                extractCopyBoost(args)
+                return
             }
 
             WEATHER_START_KEYS[key]?.let { weather ->
@@ -296,39 +415,34 @@ object BattleMessageInterceptor {
                 return
             }
 
-            // Handle volatile status start
             VOLATILE_START_KEYS[key]?.let { volatileStatus ->
                 extractVolatileStatusStart(args, volatileStatus)
                 return
             }
 
-            // Handle volatile status end
             VOLATILE_END_KEYS[key]?.let { volatileStatus ->
                 extractVolatileStatusEnd(args, volatileStatus)
                 return
             }
 
-            // Handle volatile status activate (trapping moves use "activate" instead of "start")
             VOLATILE_ACTIVATE_KEYS[key]?.let { volatileStatus ->
                 extractVolatileStatusStart(args, volatileStatus)
                 return
             }
 
-            // Handle Perish Song field effect - applies to ALL active Pokemon immediately
+            // Perish Song applies to ALL active Pokemon
             if (key == PERISH_SONG_FIELD_KEY) {
                 BattleStateTracker.applyPerishSongToAll()
                 return
             }
 
-            // Handle faint - clear stats for the fainted Pokemon
+            // Faint/switch clears stats and volatile statuses
             if (key == FAINT_KEY) {
-                clearPokemonStats(args)
+                clearPokemonState(args)
                 return
             }
-
-            // Handle switch/drag - clear stats for the Pokemon leaving battle
             if (key == SWITCH_KEY || key == DRAG_KEY) {
-                clearPokemonStats(args)
+                clearPokemonState(args)
                 return
             }
         }
@@ -354,29 +468,7 @@ object BattleMessageInterceptor {
         }
     }
 
-    private fun extractStatChange(args: Array<out Any>, stages: Int) {
-        if (args.size < 2) {
-            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Not enough args for stat change: ${args.size}")
-            return
-        }
-
-        val pokemonName = when (val arg0 = args[0]) {
-            is Text -> arg0.string
-            is String -> arg0
-            else -> arg0.toString()
-        }
-
-        val statName = when (val arg1 = args[1]) {
-            is Text -> arg1.string
-            is String -> arg1
-            else -> arg1.toString()
-        }
-
-        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Stat change - $pokemonName $statName ${if (stages > 0) "+" else ""}$stages")
-        BattleStateTracker.applyStatChange(pokemonName, statName, stages)
-    }
-
-    private fun clearPokemonStats(args: Array<out Any>) {
+    private fun clearPokemonState(args: Array<out Any>) {
         if (args.isEmpty()) return
 
         val pokemonName = when (val arg0 = args[0]) {
@@ -385,8 +477,147 @@ object BattleMessageInterceptor {
             else -> arg0.toString()
         }
 
-        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Clearing stats for $pokemonName (faint/switch)")
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Clearing stats and volatiles for $pokemonName (faint/switch)")
         BattleStateTracker.clearPokemonStatsByName(pokemonName)
+        BattleStateTracker.clearPokemonVolatilesByName(pokemonName)
+    }
+
+    private fun argToString(arg: Any): String {
+        return when (arg) {
+            is Text -> arg.string
+            is String -> arg
+            is TranslatableTextContent -> {
+                // If it's a raw TranslatableTextContent, create a Text and get string
+                Text.translatable(arg.key, *arg.args).string
+            }
+            else -> arg.toString()
+        }
+    }
+
+    // Args: [pokemonName, statName]. stages > 0 for boost, < 0 for drop.
+    private fun extractBoost(args: Array<out Any>, stages: Int) {
+        if (args.size < 2) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Boost args too short: ${args.size}, args=${args.map { "${it::class.simpleName}:$it" }}")
+            return
+        }
+
+        val pokemonName = argToString(args[0])
+        val statName = argToString(args[1])
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Boost parsing - pokemon='$pokemonName', stat='$statName', stages=$stages")
+
+        val stat = STAT_NAME_MAPPING[statName.lowercase()] ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Unknown stat name: '$statName' (lowercase: '${statName.lowercase()}')")
+            return
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: $pokemonName ${stat.abbr} ${if (stages > 0) "+" else ""}$stages")
+        BattleStateTracker.applyStatChange(pokemonName, stat, stages)
+    }
+
+    // Belly Drum / Anger Point: sets Attack to +6
+    private fun extractSetBoost(args: Array<out Any>) {
+        if (args.isEmpty()) return
+
+        val pokemonName = when (val arg0 = args[0]) {
+            is Text -> arg0.string
+            is String -> arg0
+            else -> arg0.toString()
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: $pokemonName Attack set to +6 (Belly Drum/Anger Point)")
+        BattleStateTracker.setStatStage(pokemonName, BattleStateTracker.BattleStat.ATTACK, 6)
+    }
+
+    private fun extractClearBoost(args: Array<out Any>) {
+        if (args.isEmpty()) return
+
+        val pokemonName = when (val arg0 = args[0]) {
+            is Text -> arg0.string
+            is String -> arg0
+            else -> arg0.toString()
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Clearing all stats for $pokemonName")
+        BattleStateTracker.clearPokemonStatsByName(pokemonName)
+    }
+
+    // Topsy-Turvy: invert all stat changes
+    private fun extractInvertBoost(args: Array<out Any>) {
+        if (args.isEmpty()) return
+
+        val pokemonName = when (val arg0 = args[0]) {
+            is Text -> arg0.string
+            is String -> arg0
+            else -> arg0.toString()
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Inverting stats for $pokemonName")
+        BattleStateTracker.invertStats(pokemonName)
+    }
+
+    // Heart Swap: swap all stats. Single-arg variant uses lastMoveTarget.
+    private fun extractSwapBoostAllStats(args: Array<out Any>) {
+        if (args.isEmpty()) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: SwapBoostAllStats no args")
+            return
+        }
+
+        val pokemon1 = argToString(args[0])
+        val pokemon2: String
+
+        if (args.size >= 2) {
+            // Generic swap with both Pokemon specified
+            pokemon2 = argToString(args[1])
+        } else {
+            // Single arg (heartswap) - use tracked target
+            pokemon2 = lastMoveTarget ?: run {
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: SwapBoostAllStats no target tracked for $pokemon1")
+                return
+            }
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Swapping ALL stats between $pokemon1 and $pokemon2")
+        BattleStateTracker.swapStats(pokemon1, pokemon2)
+    }
+
+    // Power/Guard/Speed Swap: swap specific stats. Single-arg variant uses lastMoveTarget.
+    private fun extractSwapBoostSpecific(args: Array<out Any>, statsToSwap: List<BattleStateTracker.BattleStat>) {
+        if (args.isEmpty()) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: SwapBoostSpecific no args")
+            return
+        }
+
+        val pokemon1 = argToString(args[0])
+        val pokemon2: String
+
+        if (args.size >= 2) {
+            // Two args provided
+            pokemon2 = argToString(args[1])
+        } else {
+            // Single arg - use tracked target
+            pokemon2 = lastMoveTarget ?: run {
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: SwapBoostSpecific no target tracked for $pokemon1")
+                return
+            }
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Swapping ${statsToSwap.map { it.abbr }} between $pokemon1 and $pokemon2")
+        BattleStateTracker.swapSpecificStats(pokemon1, pokemon2, statsToSwap)
+    }
+
+    // Psych Up: copy all stat changes from source to copier
+    private fun extractCopyBoost(args: Array<out Any>) {
+        if (args.size < 2) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: CopyBoost needs 2 args, got ${args.size}")
+            return
+        }
+
+        val copier = argToString(args[0])
+        val source = argToString(args[1])
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: $copier copies stats from $source")
+        BattleStateTracker.copyStats(source, copier)
     }
 
     private fun extractVolatileStatusStart(args: Array<out Any>, volatileStatus: BattleStateTracker.VolatileStatus) {

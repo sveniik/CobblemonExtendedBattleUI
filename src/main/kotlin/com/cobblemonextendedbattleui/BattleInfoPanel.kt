@@ -1,6 +1,7 @@
 package com.cobblemonextendedbattleui
 
 import com.cobblemon.mod.common.client.CobblemonClient
+import com.cobblemon.mod.common.client.battle.ClientBattleSide
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.util.InputUtil
@@ -111,13 +112,13 @@ object BattleInfoPanel {
     // Track previously active Pokemon to detect switches and clear their stats
     private var previouslyActiveUUIDs: Set<UUID> = emptySet()
 
-    /**
-     * Data class holding all battle-relevant info for a Pokemon.
-     */
+    // Track if we were in a battle last frame (for detecting spectate exit)
+    private var wasInBattle: Boolean = false
+
     data class PokemonBattleData(
         val uuid: UUID,
         val name: String,
-        val statChanges: List<Map.Entry<com.cobblemon.mod.common.api.pokemon.stats.Stat, Int>>,
+        val statChanges: Map<BattleStateTracker.BattleStat, Int>,
         val volatiles: Set<BattleStateTracker.VolatileStatusState>,
         val isAlly: Boolean
     ) {
@@ -422,8 +423,27 @@ object BattleInfoPanel {
     }
 
     fun render(context: DrawContext) {
-        val battle = CobblemonClient.battle ?: return
+        val battle = CobblemonClient.battle
+
+        // Handle battle exit (including spectator exit)
+        if (battle == null) {
+            if (wasInBattle) {
+                // We just exited a battle - clear all state
+                BattleStateTracker.clear()
+                TeamIndicatorUI.clear()
+                clearBattleState()
+                BattleLog.clear()
+                BattleLogWidget.clear()
+                wasInBattle = false
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleInfoPanel: Cleared state on battle exit")
+            }
+            return
+        }
+
         if (battle.minimised) return
+
+        // Mark that we're now in a battle
+        wasInBattle = true
 
         // Clear state if this is a new battle
         BattleStateTracker.checkBattleChanged(battle.battleId)
@@ -449,6 +469,16 @@ object BattleInfoPanel {
         }
         val opponentSide = if (playerSide == battle.side1) battle.side2 else battle.side1
 
+        // Get player names for section headers
+        val playerSideNames = getPlayerSideNames(playerSide, isSpectating, isPlayerSide = true)
+        val opponentSideNames = getPlayerSideNames(opponentSide, isSpectating, isPlayerSide = false)
+
+        // Set player names in BattleStateTracker for disambiguating mirror matches
+        // Use the raw actor names (not truncated) for matching
+        val allyActorName = playerSide.actors.firstOrNull()?.displayName?.string ?: ""
+        val opponentActorName = opponentSide.actors.firstOrNull()?.displayName?.string ?: ""
+        BattleStateTracker.setPlayerNames(allyActorName, opponentActorName)
+
         // Get ally and opponent Pokemon separately
         val allyPokemon = playerSide.activeClientBattlePokemon.mapNotNull { it.battlePokemon }
         val opponentPokemon = opponentSide.activeClientBattlePokemon.mapNotNull { it.battlePokemon }
@@ -456,11 +486,17 @@ object BattleInfoPanel {
         // Get current active Pokemon UUIDs
         val currentActiveUUIDs = (allyPokemon + opponentPokemon).map { it.uuid }.toSet()
 
-        // Clear stats for any Pokemon that was previously active but is no longer
-        // (switching out resets stat changes in Pokemon)
+        // Handle Pokemon switching out
+        // Check for Baton Pass before clearing - if used, stats/volatiles transfer to replacement
         for (uuid in previouslyActiveUUIDs) {
             if (uuid !in currentActiveUUIDs) {
-                BattleStateTracker.clearPokemonStats(uuid)
+                // Check if this Pokemon used Baton Pass - if so, preserve stats for transfer
+                val usedBatonPass = BattleStateTracker.prepareBatonPassIfUsed(uuid)
+                if (!usedBatonPass) {
+                    // Normal switch: clear stats and volatiles
+                    BattleStateTracker.clearPokemonStats(uuid)
+                    BattleStateTracker.clearPokemonVolatiles(uuid)
+                }
             }
         }
         previouslyActiveUUIDs = currentActiveUUIDs
@@ -473,18 +509,25 @@ object BattleInfoPanel {
             BattleStateTracker.registerPokemon(pokemon.uuid, pokemon.displayName.string, isAlly = false)
         }
 
+        // Apply any pending Baton Pass data to newly switched-in Pokemon
+        for (pokemon in allyPokemon) {
+            BattleStateTracker.applyBatonPassIfPending(pokemon.uuid)
+        }
+        for (pokemon in opponentPokemon) {
+            BattleStateTracker.applyBatonPassIfPending(pokemon.uuid)
+        }
+
         // Build Pokemon data with stat changes and volatile statuses, separated by side
+        // Stat changes are tracked via message parsing in BattleStateTracker
         val allyPokemonData = allyPokemon.map { pokemon ->
-            val stats = BattleStateTracker.getStatChanges(pokemon.uuid)
-            val changedStats = stats.entries.filter { it.value != 0 }
+            val statChanges = BattleStateTracker.getStatChanges(pokemon.uuid)
             val volatiles = BattleStateTracker.getVolatileStatuses(pokemon.uuid)
-            PokemonBattleData(pokemon.uuid, pokemon.displayName.string, changedStats, volatiles, isAlly = true)
+            PokemonBattleData(pokemon.uuid, pokemon.displayName.string, statChanges, volatiles, isAlly = true)
         }
         val opponentPokemonData = opponentPokemon.map { pokemon ->
-            val stats = BattleStateTracker.getStatChanges(pokemon.uuid)
-            val changedStats = stats.entries.filter { it.value != 0 }
+            val statChanges = BattleStateTracker.getStatChanges(pokemon.uuid)
             val volatiles = BattleStateTracker.getVolatileStatuses(pokemon.uuid)
-            PokemonBattleData(pokemon.uuid, pokemon.displayName.string, changedStats, volatiles, isAlly = false)
+            PokemonBattleData(pokemon.uuid, pokemon.displayName.string, statChanges, volatiles, isAlly = false)
         }
 
         // Update font scaling based on user preference
@@ -524,9 +567,9 @@ object BattleInfoPanel {
         PanelConfig.scrollOffset = PanelConfig.scrollOffset.coerceIn(0, maxScroll)
 
         if (isExpanded) {
-            renderExpanded(context, clampedX, clampedY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData)
+            renderExpanded(context, clampedX, clampedY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData, playerSideNames, opponentSideNames)
         } else {
-            renderCollapsed(context, clampedX, clampedY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData)
+            renderCollapsed(context, clampedX, clampedY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData, playerSideNames, opponentSideNames)
         }
 
         // Only draw resize handles in expanded mode
@@ -579,7 +622,9 @@ object BattleInfoPanel {
         width: Int,
         height: Int,
         allyPokemonData: List<PokemonBattleData>,
-        opponentPokemonData: List<PokemonBattleData>
+        opponentPokemonData: List<PokemonBattleData>,
+        playerSideNames: SideNames,
+        opponentSideNames: SideNames
     ) {
         drawRoundedRect(context, x, y, width, height, PANEL_BG, BORDER_COLOR)
         renderHeader(context, x, y, width)
@@ -630,27 +675,27 @@ object BattleInfoPanel {
             }
 
             if (playerConds.isNotEmpty()) {
-                drawText(context, "Ally: ${playerConds.size} effect${if (playerConds.size > 1) "s" else ""}",
+                drawText(context, "${playerSideNames.sideName}: ${playerConds.size} effect${if (playerConds.size > 1) "s" else ""}",
                     (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_PLAYER, 0.8f * textScale)
                 currentY += (lineHeight * 0.9).toInt()
             }
 
             if (oppConds.isNotEmpty()) {
-                drawText(context, "Enemy: ${oppConds.size} effect${if (oppConds.size > 1) "s" else ""}",
+                drawText(context, "${opponentSideNames.sideName}: ${oppConds.size} effect${if (oppConds.size > 1) "s" else ""}",
                     (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_OPPONENT, 0.8f * textScale)
                 currentY += (lineHeight * 0.9).toInt()
             }
 
             if (allyEffectCount > 0) {
-                val pokemonText = if (allyEffectCount == 1) "1 ally" else "$allyEffectCount allies"
-                drawText(context, "Your Pokémon: $pokemonText affected",
+                val pokemonText = if (allyEffectCount == 1) "1 Pokémon" else "$allyEffectCount Pokémon"
+                drawText(context, "${playerSideNames.possessiveName}: $pokemonText affected",
                     (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_PLAYER, 0.8f * textScale)
                 currentY += (lineHeight * 0.9).toInt()
             }
 
             if (enemyEffectCount > 0) {
-                val pokemonText = if (enemyEffectCount == 1) "1 enemy" else "$enemyEffectCount enemies"
-                drawText(context, "Enemy Pokémon: $pokemonText affected",
+                val pokemonText = if (enemyEffectCount == 1) "1 Pokémon" else "$enemyEffectCount Pokémon"
+                drawText(context, "${opponentSideNames.possessiveName}: $pokemonText affected",
                     (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_OPPONENT, 0.8f * textScale)
             }
         }
@@ -665,18 +710,17 @@ object BattleInfoPanel {
         width: Int,
         height: Int,
         allyPokemonData: List<PokemonBattleData>,
-        opponentPokemonData: List<PokemonBattleData>
+        opponentPokemonData: List<PokemonBattleData>,
+        playerSideNames: SideNames,
+        opponentSideNames: SideNames
     ) {
         drawRoundedRect(context, x, y, width, height, PANEL_BG, BORDER_COLOR)
         renderHeader(context, x, y, width)
 
         // Render content
-        renderInfoTab(context, x, y, width, height, allyPokemonData, opponentPokemonData)
+        renderInfoTab(context, x, y, width, height, allyPokemonData, opponentPokemonData, playerSideNames, opponentSideNames)
     }
 
-    /**
-     * Render the Info tab content (field conditions, side conditions, Pokemon status).
-     */
     private fun renderInfoTab(
         context: DrawContext,
         x: Int,
@@ -684,7 +728,9 @@ object BattleInfoPanel {
         width: Int,
         height: Int,
         allyPokemonData: List<PokemonBattleData>,
-        opponentPokemonData: List<PokemonBattleData>
+        opponentPokemonData: List<PokemonBattleData>,
+        playerSideNames: SideNames,
+        opponentSideNames: SideNames
     ) {
         val contentStartY = y + HEADER_HEIGHT + SECTION_GAP
         val contentAreaHeight = height - HEADER_HEIGHT - PADDING
@@ -734,7 +780,7 @@ object BattleInfoPanel {
         currentY += SECTION_GAP
 
         // ALLY SIDE EFFECTS section (screens, hazards on your side)
-        currentY = renderSection(context, x, currentY, contentWidth, "ALLY SIDE", ACCENT_PLAYER) { sectionY ->
+        currentY = renderSection(context, x, currentY, contentWidth, "${playerSideNames.sideName} SIDE", ACCENT_PLAYER) { sectionY ->
             var sy = sectionY
             val conditions = BattleStateTracker.getPlayerSideConditions()
 
@@ -760,7 +806,7 @@ object BattleInfoPanel {
         currentY += SECTION_GAP
 
         // ENEMY SIDE EFFECTS section (screens, hazards on enemy side)
-        currentY = renderSection(context, x, currentY, contentWidth, "ENEMY SIDE", ACCENT_OPPONENT) { sectionY ->
+        currentY = renderSection(context, x, currentY, contentWidth, "${opponentSideNames.sideName} SIDE", ACCENT_OPPONENT) { sectionY ->
             var sy = sectionY
             val conditions = BattleStateTracker.getOpponentSideConditions()
 
@@ -786,14 +832,14 @@ object BattleInfoPanel {
         currentY += SECTION_GAP
 
         // YOUR POKÉMON section
-        currentY = renderSection(context, x, currentY, contentWidth, "YOUR POKÉMON", ACCENT_PLAYER) { sectionY ->
+        currentY = renderSection(context, x, currentY, contentWidth, "${playerSideNames.possessiveName} POKÉMON", ACCENT_PLAYER) { sectionY ->
             renderPokemonSection(context, x, sectionY, contentWidth, allyPokemonData)
         }
 
         currentY += SECTION_GAP
 
         // ENEMY POKÉMON section
-        renderSection(context, x, currentY, contentWidth, "ENEMY POKÉMON", ACCENT_OPPONENT) { sectionY ->
+        renderSection(context, x, currentY, contentWidth, "${opponentSideNames.possessiveName} POKÉMON", ACCENT_OPPONENT) { sectionY ->
             renderPokemonSection(context, x, sectionY, contentWidth, opponentPokemonData)
         }
 
@@ -804,9 +850,6 @@ object BattleInfoPanel {
         }
     }
 
-    /**
-     * Render a Pokemon section showing stats and volatile effects for each Pokemon.
-     */
     private fun renderPokemonSection(
         context: DrawContext,
         x: Int,
@@ -833,13 +876,13 @@ object BattleInfoPanel {
 
             // Stat changes (if any)
             if (pokemon.statChanges.isNotEmpty()) {
-                val sortedStats = pokemon.statChanges.sortedBy { getStatSortOrder(it.key.identifier.toString()) }
+                val sortedStats = pokemon.statChanges.entries.sortedBy { getStatSortOrderFromBattleStat(it.key) }
                 val charWidth = (5 * textScale).toInt()
                 val startX = x + PADDING + (8 * textScale).toInt()
 
                 var statX = startX
                 for ((stat, value) in sortedStats) {
-                    val abbr = getStatAbbr(stat.identifier.toString())
+                    val abbr = stat.abbr
                     val arrows = if (value > 0) "↑".repeat(value) else "↓".repeat(-value)
                     val color = if (value > 0) STAT_BOOST else STAT_DROP
 
@@ -1053,9 +1096,6 @@ object BattleInfoPanel {
         return height
     }
 
-    /**
-     * Calculate height needed for a Pokemon section (stats + volatiles).
-     */
     private fun calculatePokemonSectionHeight(
         pokemonData: List<PokemonBattleData>,
         panelWidth: Int
@@ -1081,10 +1121,10 @@ object BattleInfoPanel {
             // Stats line(s)
             if (pokemon.statChanges.isNotEmpty()) {
                 var statX = startX
-                val sortedStats = pokemon.statChanges.sortedBy { getStatSortOrder(it.key.identifier.toString()) }
+                val sortedStats = pokemon.statChanges.entries.sortedBy { getStatSortOrderFromBattleStat(it.key) }
 
                 for ((stat, value) in sortedStats) {
-                    val abbr = getStatAbbr(stat.identifier.toString())
+                    val abbr = stat.abbr
                     val arrowCount = kotlin.math.abs(value)
                     val entryWidth = ((abbr.length * charWidth) + 2 + (arrowCount * charWidth) + (8 * textScale)).toInt()
 
@@ -1133,32 +1173,40 @@ object BattleInfoPanel {
         UIUtils.drawTextClipped(context, text, x, y, color, scale, scissorBounds)
     }
 
-    private fun getStatAbbr(identifier: String): String {
-        return when {
-            identifier.contains("attack") && identifier.contains("special") -> "SpA"
-            identifier.contains("attack") -> "Atk"
-            identifier.contains("defense") && identifier.contains("special") -> "SpD"
-            identifier.contains("defence") && identifier.contains("special") -> "SpD"
-            identifier.contains("defense") -> "Def"
-            identifier.contains("defence") -> "Def"
-            identifier.contains("speed") -> "Spe"
-            identifier.contains("evasion") -> "Eva"
-            identifier.contains("accuracy") -> "Acc"
-            else -> identifier.take(3).uppercase()
+    private fun getStatSortOrderFromBattleStat(stat: BattleStateTracker.BattleStat): Int {
+        return when (stat) {
+            BattleStateTracker.BattleStat.ATTACK -> 0
+            BattleStateTracker.BattleStat.DEFENSE -> 1
+            BattleStateTracker.BattleStat.SPECIAL_ATTACK -> 2
+            BattleStateTracker.BattleStat.SPECIAL_DEFENSE -> 3
+            BattleStateTracker.BattleStat.SPEED -> 4
+            BattleStateTracker.BattleStat.ACCURACY -> 5
+            BattleStateTracker.BattleStat.EVASION -> 6
         }
     }
 
-    private fun getStatSortOrder(identifier: String): Int {
-        val id = identifier.lowercase()
-        return when {
-            id.contains("attack") && id.contains("special") -> 2
-            id.contains("attack") -> 0
-            (id.contains("defense") || id.contains("defence")) && id.contains("special") -> 3
-            id.contains("defense") || id.contains("defence") -> 1
-            id.contains("speed") -> 4
-            id.contains("accuracy") -> 5
-            id.contains("evasion") -> 6
-            else -> 7
+    data class SideNames(
+        val sideName: String,      // e.g., "PLAYER123"
+        val possessiveName: String // e.g., "PLAYER123"
+    )
+
+    private fun getPlayerSideNames(side: ClientBattleSide, isSpectating: Boolean, isPlayerSide: Boolean): SideNames {
+        val actors = side.actors
+        if (actors.isEmpty()) {
+            return if (isPlayerSide) SideNames("ALLY", "ALLY") else SideNames("ENEMY", "ENEMY")
         }
+
+        // Get the first actor's display name
+        val firstActorName = actors.firstOrNull()?.displayName?.string
+            ?: return if (isPlayerSide) SideNames("ALLY", "ALLY") else SideNames("ENEMY", "ENEMY")
+
+        // Truncate long names to fit in section headers
+        val truncatedName = if (firstActorName.length > 12) {
+            firstActorName.take(11) + "…"
+        } else {
+            firstActorName
+        }
+
+        return SideNames(truncatedName.uppercase(), truncatedName.uppercase())
     }
 }

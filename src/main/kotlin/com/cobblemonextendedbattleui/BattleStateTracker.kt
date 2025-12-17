@@ -1,14 +1,29 @@
 package com.cobblemonextendedbattleui
 
-import com.cobblemon.mod.common.api.pokemon.stats.Stat
-import com.cobblemon.mod.common.api.pokemon.stats.Stats
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Tracks weather, terrain, field conditions, side conditions, and stat changes.
+ * Tracks weather, terrain, field conditions, side conditions, stat changes, and volatile statuses.
  */
 object BattleStateTracker {
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Stat Change Tracking
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    enum class BattleStat(val displayName: String, val abbr: String) {
+        ATTACK("Attack", "Atk"),
+        DEFENSE("Defense", "Def"),
+        SPECIAL_ATTACK("Sp. Atk", "SpA"),
+        SPECIAL_DEFENSE("Sp. Def", "SpD"),
+        SPEED("Speed", "Spe"),
+        ACCURACY("Accuracy", "Acc"),
+        EVASION("Evasion", "Eva")
+    }
+
+    // Maps UUID -> Map<BattleStat, Int> for stat stages (-6 to +6)
+    private val statChanges = ConcurrentHashMap<UUID, ConcurrentHashMap<BattleStat, Int>>()
 
     private var lastBattleId: UUID? = null
 
@@ -84,12 +99,8 @@ object BattleStateTracker {
     }
 
     /**
-     * Volatile statuses are per-Pokemon conditions that clear on switch.
-     * Based on official Pokemon mechanics from Bulbapedia.
-     * @see https://bulbapedia.bulbagarden.net/wiki/Status_condition#Volatile_status
-     *
-     * @param baseDuration Number of turns the effect lasts (null = indefinite/until cured)
-     * @param countsDown If true, displays as countdown (3, 2, 1). If false, displays elapsed turns.
+     * Per-Pokemon conditions that clear on switch.
+     * baseDuration = turns until expiry (null = indefinite), countsDown = display as countdown.
      */
     enum class VolatileStatus(
         val displayName: String,
@@ -151,10 +162,46 @@ object BattleStateTracker {
 
     private val playerSideConditions = ConcurrentHashMap<SideCondition, SideConditionState>()
     private val opponentSideConditions = ConcurrentHashMap<SideCondition, SideConditionState>()
-    private val statChanges = ConcurrentHashMap<UUID, MutableMap<Stat, Int>>()
     private val volatileStatuses = ConcurrentHashMap<UUID, MutableSet<VolatileStatusState>>()
-    private val nameToUuid = ConcurrentHashMap<String, UUID>()
+    // Maps lowercase name -> list of (UUID, isAlly) pairs to handle mirror matches
+    private val nameToUuids = ConcurrentHashMap<String, MutableList<Pair<UUID, Boolean>>>()
     private val uuidIsAlly = ConcurrentHashMap<UUID, Boolean>()
+    // Track player names for each side to disambiguate owner prefixes in messages (for volatiles)
+    private var allyPlayerName: String? = null
+    private var opponentPlayerName: String? = null
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Baton Pass Support
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Data class to hold stats and volatiles that transfer via Baton Pass.
+     */
+    data class BatonPassData(
+        val stats: Map<BattleStat, Int>,
+        val volatiles: Set<VolatileStatusState>
+    )
+
+    /**
+     * Volatiles that transfer via Baton Pass (based on official Pokemon mechanics).
+     * Most move-specific effects and negative conditions don't transfer.
+     */
+    private val BATON_PASS_VOLATILES = setOf(
+        VolatileStatus.SUBSTITUTE,
+        VolatileStatus.FOCUS_ENERGY,
+        VolatileStatus.INGRAIN,
+        VolatileStatus.AQUA_RING,
+        VolatileStatus.MAGNET_RISE,
+        VolatileStatus.CONFUSION,  // Confusion does transfer
+        VolatileStatus.EMBARGO,
+        VolatileStatus.HEAL_BLOCK
+    )
+
+    // Pending Baton Pass data by side (true = ally, false = opponent)
+    private val pendingBatonPass = ConcurrentHashMap<Boolean, BatonPassData>()
+
+    // Track which Pokemon used Baton Pass (by UUID) - cleared on switch
+    private val batonPassUsers = ConcurrentHashMap.newKeySet<UUID>()
 
     fun clear() {
         lastBattleId = null
@@ -166,9 +213,24 @@ object BattleStateTracker {
         opponentSideConditions.clear()
         statChanges.clear()
         volatileStatuses.clear()
-        nameToUuid.clear()
+        nameToUuids.clear()
         uuidIsAlly.clear()
+        allyPlayerName = null
+        opponentPlayerName = null
+        pendingBatonPass.clear()
+        batonPassUsers.clear()
+        BattleMessageInterceptor.clearMoveTracking()
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared all state")
+    }
+
+    /**
+     * Set the player names for each side. Used to disambiguate Pokemon ownership
+     * when messages include owner prefixes like "Player123's Togekiss".
+     */
+    fun setPlayerNames(allyName: String, opponentName: String) {
+        allyPlayerName = allyName.lowercase()
+        opponentPlayerName = opponentName.lowercase()
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Player names set - Ally: $allyName, Opponent: $opponentName")
     }
 
     fun setTurn(turn: Int) {
@@ -315,53 +377,150 @@ object BattleStateTracker {
     }
 
     fun registerPokemon(uuid: UUID, name: String, isAlly: Boolean) {
-        nameToUuid[name.lowercase()] = uuid
+        val lowerName = name.lowercase()
+        val uuidList = nameToUuids.computeIfAbsent(lowerName) { mutableListOf() }
+
+        // Check if this UUID is already registered under this name
+        val existingEntry = uuidList.find { it.first == uuid }
+        if (existingEntry == null) {
+            uuidList.add(Pair(uuid, isAlly))
+        } else if (existingEntry.second != isAlly) {
+            // Update ally status if it changed (shouldn't happen, but be safe)
+            uuidList.remove(existingEntry)
+            uuidList.add(Pair(uuid, isAlly))
+        }
+
         uuidIsAlly[uuid] = isAlly
-        statChanges.computeIfAbsent(uuid) { ConcurrentHashMap() }
         volatileStatuses.computeIfAbsent(uuid) { ConcurrentHashMap.newKeySet() }
     }
 
     fun isPokemonAlly(uuid: UUID): Boolean = uuidIsAlly[uuid] ?: false
 
-    fun applyStatChange(pokemonName: String, statName: String, stages: Int) {
-        val uuid = resolvePokemonUuid(pokemonName) ?: run {
-            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName'")
-            return
-        }
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Stat Change Functions
+    // ═══════════════════════════════════════════════════════════════════════════
 
-        val stat = getStatFromName(statName) ?: run {
-            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown stat '$statName'")
+    fun applyStatChange(pokemonName: String, stat: BattleStat, stages: Int, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for stat change")
             return
         }
 
         val pokemonStats = statChanges.computeIfAbsent(uuid) { ConcurrentHashMap() }
-        val currentStage = pokemonStats.getOrDefault(stat, 0)
+        val currentStage = pokemonStats[stat] ?: 0
         val newStage = (currentStage + stages).coerceIn(-6, 6)
         pokemonStats[stat] = newStage
 
-        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName $statName ${if (stages > 0) "+" else ""}$stages (now at $newStage)")
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName ${stat.abbr} $currentStage -> $newStage")
+    }
+
+    fun setStatStage(pokemonName: String, stat: BattleStat, stage: Int, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return
+        val pokemonStats = statChanges.computeIfAbsent(uuid) { ConcurrentHashMap() }
+        pokemonStats[stat] = stage.coerceIn(-6, 6)
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName ${stat.abbr} set to $stage")
     }
 
     fun clearPokemonStats(uuid: UUID) {
         statChanges[uuid]?.clear()
-        volatileStatuses[uuid]?.clear()  // Volatiles also clear on switch
-        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared stats and volatiles for UUID $uuid")
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared stats for UUID $uuid")
     }
 
-    fun clearPokemonStatsByName(pokemonName: String) {
-        val uuid = resolvePokemonUuid(pokemonName)
-        if (uuid != null) {
-            clearPokemonStats(uuid)
-        } else {
-            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Could not find UUID for '$pokemonName' to clear stats")
+    fun clearPokemonStatsByName(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return
+        clearPokemonStats(uuid)
+    }
+
+    // Haze
+    fun clearAllStatsForAll() {
+        statChanges.values.forEach { it.clear() }
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared all stats for all Pokemon (Haze)")
+    }
+
+    // Topsy-Turvy
+    fun invertStats(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return
+        statChanges[uuid]?.let { stats ->
+            stats.entries.forEach { (stat, value) ->
+                stats[stat] = -value
+            }
+        }
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Inverted stats for $pokemonName")
+    }
+
+    // Psych Up
+    fun copyStats(sourceName: String, targetName: String, sourceIsAlly: Boolean? = null, targetIsAlly: Boolean? = null) {
+        val sourceUuid = resolvePokemonUuid(sourceName, sourceIsAlly) ?: return
+        val targetUuid = resolvePokemonUuid(targetName, targetIsAlly) ?: return
+        val sourceStats = statChanges[sourceUuid] ?: return
+
+        val targetStats = statChanges.computeIfAbsent(targetUuid) { ConcurrentHashMap() }
+        targetStats.clear()
+        targetStats.putAll(sourceStats)
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $targetName copied stats from $sourceName")
+    }
+
+    // Heart Swap
+    fun swapStats(pokemon1Name: String, pokemon2Name: String, pokemon1IsAlly: Boolean? = null, pokemon2IsAlly: Boolean? = null) {
+        val uuid1 = resolvePokemonUuid(pokemon1Name, pokemon1IsAlly) ?: return
+        val uuid2 = resolvePokemonUuid(pokemon2Name, pokemon2IsAlly) ?: return
+
+        val stats1 = statChanges[uuid1]?.toMap() ?: emptyMap()
+        val stats2 = statChanges[uuid2]?.toMap() ?: emptyMap()
+
+        val pokemonStats1 = statChanges.computeIfAbsent(uuid1) { ConcurrentHashMap() }
+        val pokemonStats2 = statChanges.computeIfAbsent(uuid2) { ConcurrentHashMap() }
+
+        pokemonStats1.clear()
+        pokemonStats1.putAll(stats2)
+        pokemonStats2.clear()
+        pokemonStats2.putAll(stats1)
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Swapped stats between $pokemon1Name and $pokemon2Name")
+    }
+
+    // Power Swap, Guard Swap, Speed Swap
+    fun swapSpecificStats(pokemon1Name: String, pokemon2Name: String, statsToSwap: List<BattleStat>,
+                          pokemon1IsAlly: Boolean? = null, pokemon2IsAlly: Boolean? = null) {
+        val uuid1 = resolvePokemonUuid(pokemon1Name, pokemon1IsAlly) ?: return
+        val uuid2 = resolvePokemonUuid(pokemon2Name, pokemon2IsAlly) ?: return
+
+        val pokemonStats1 = statChanges.computeIfAbsent(uuid1) { ConcurrentHashMap() }
+        val pokemonStats2 = statChanges.computeIfAbsent(uuid2) { ConcurrentHashMap() }
+
+        for (stat in statsToSwap) {
+            val val1 = pokemonStats1[stat] ?: 0
+            val val2 = pokemonStats2[stat] ?: 0
+            pokemonStats1[stat] = val2
+            pokemonStats2[stat] = val1
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Swapped ${statsToSwap.map { it.abbr }} between $pokemon1Name and $pokemon2Name")
+    }
+
+    fun getStatChanges(uuid: UUID): Map<BattleStat, Int> {
+        return statChanges[uuid]?.filter { it.value != 0 } ?: emptyMap()
+    }
+
+    fun getStatFromName(name: String): BattleStat? {
+        return when (name.lowercase()) {
+            "atk", "attack" -> BattleStat.ATTACK
+            "def", "defense" -> BattleStat.DEFENSE
+            "spa", "specialattack", "spattack", "spatk" -> BattleStat.SPECIAL_ATTACK
+            "spd", "specialdefense", "spdefense", "spdef" -> BattleStat.SPECIAL_DEFENSE
+            "spe", "speed" -> BattleStat.SPEED
+            "accuracy", "acc" -> BattleStat.ACCURACY
+            "evasion", "evasiveness", "eva" -> BattleStat.EVASION
+            else -> null
         }
     }
 
-    fun getStatChanges(uuid: UUID): Map<Stat, Int> = statChanges[uuid] ?: emptyMap()
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Volatile Status Management
+    // ═══════════════════════════════════════════════════════════════════════════
 
-    // Volatile status management
-    fun setVolatileStatus(pokemonName: String, type: VolatileStatus) {
-        val uuid = resolvePokemonUuid(pokemonName) ?: run {
+    fun setVolatileStatus(pokemonName: String, type: VolatileStatus, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
             CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for volatile status")
             return
         }
@@ -376,8 +535,8 @@ object BattleStateTracker {
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName gained volatile ${type.displayName}")
     }
 
-    fun clearVolatileStatus(pokemonName: String, type: VolatileStatus) {
-        val uuid = resolvePokemonUuid(pokemonName) ?: return
+    fun clearVolatileStatus(pokemonName: String, type: VolatileStatus, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return
         volatileStatuses[uuid]?.removeIf { it.type == type }
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName lost volatile ${type.displayName}")
     }
@@ -387,19 +546,14 @@ object BattleStateTracker {
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared volatiles for UUID $uuid")
     }
 
-    fun clearPokemonVolatilesByName(pokemonName: String) {
-        val uuid = resolvePokemonUuid(pokemonName) ?: return
+    fun clearPokemonVolatilesByName(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return
         clearPokemonVolatiles(uuid)
     }
 
     fun getVolatileStatuses(uuid: UUID): Set<VolatileStatusState> =
         volatileStatuses[uuid]?.toSet() ?: emptySet()
 
-    /**
-     * Get the turns remaining for a volatile status, or null if it has no duration.
-     * For countdown effects (like Perish Song), returns the countdown value (3, 2, 1).
-     * For other timed effects, returns turns remaining.
-     */
     fun getVolatileTurnsRemaining(state: VolatileStatusState): String? {
         val duration = state.type.baseDuration ?: return null
         val turnsElapsed = currentTurn - state.startTurn
@@ -415,39 +569,218 @@ object BattleStateTracker {
         }
     }
 
-    /**
-     * Apply Perish Song to ALL registered Pokemon.
-     * Called when "cobblemon.battle.fieldactivate.perishsong" is detected.
-     */
     fun applyPerishSongToAll() {
         val effectiveStartTurn = maxOf(1, currentTurn)
         var count = 0
 
-        // nameToUuid maps name -> UUID, so iterate over its values
-        for ((_, uuid) in nameToUuid) {
-            val statuses = volatileStatuses.computeIfAbsent(uuid) { ConcurrentHashMap.newKeySet() }
+        // Iterate over all registered Pokemon UUIDs
+        for ((_, uuidList) in nameToUuids) {
+            for ((uuid, _) in uuidList) {
+                val statuses = volatileStatuses.computeIfAbsent(uuid) { ConcurrentHashMap.newKeySet() }
 
-            // Only add if not already affected
-            if (statuses.none { it.type == VolatileStatus.PERISH_SONG }) {
-                statuses.add(VolatileStatusState(VolatileStatus.PERISH_SONG, effectiveStartTurn))
-                count++
+                // Only add if not already affected
+                if (statuses.none { it.type == VolatileStatus.PERISH_SONG }) {
+                    statuses.add(VolatileStatusState(VolatileStatus.PERISH_SONG, effectiveStartTurn))
+                    count++
+                }
             }
         }
 
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Perish Song applied to $count Pokemon")
     }
 
-    private fun resolvePokemonUuid(pokemonName: String): UUID? {
-        // Try direct lookup first
-        var uuid = nameToUuid[pokemonName.lowercase()]
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Baton Pass Handling
+    // ═══════════════════════════════════════════════════════════════════════════
 
-        // If not found, try stripping possessive prefix (e.g., "Player126's Tyranitar" -> "Tyranitar")
-        if (uuid == null && pokemonName.contains("'s ")) {
-            val strippedName = pokemonName.substringAfter("'s ").lowercase()
-            uuid = nameToUuid[strippedName]
+    /**
+     * Mark a Pokemon as having used Baton Pass. Call this when the move is used.
+     * The actual stat/volatile transfer happens when the Pokemon leaves the field.
+     */
+    fun markBatonPassUsed(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return
+        batonPassUsers.add(uuid)
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName used Baton Pass")
+    }
+
+    /**
+     * Check if a Pokemon used Baton Pass and prepare the transfer data.
+     * Copies stats/volatiles to pending storage, then clears them from the original Pokemon.
+     * Returns true if Baton Pass was used.
+     */
+    fun prepareBatonPassIfUsed(uuid: UUID): Boolean {
+        if (!batonPassUsers.remove(uuid)) {
+            return false  // This Pokemon didn't use Baton Pass
         }
 
-        return uuid
+        val isAlly = uuidIsAlly[uuid] ?: return false
+        val stats = statChanges[uuid]?.filter { it.value != 0 }?.toMap() ?: emptyMap()
+        val volatiles = volatileStatuses[uuid]
+            ?.filter { it.type in BATON_PASS_VOLATILES }
+            ?.toSet() ?: emptySet()
+
+        if (stats.isNotEmpty() || volatiles.isNotEmpty()) {
+            pendingBatonPass[isAlly] = BatonPassData(stats, volatiles)
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "BattleStateTracker: Prepared Baton Pass data for ${if (isAlly) "ally" else "opponent"} side: " +
+                "${stats.size} stats, ${volatiles.size} volatiles"
+            )
+        }
+
+        // Clear the original Pokemon's stats/volatiles after copying
+        // This prevents them from persisting if this Pokemon switches back in later
+        statChanges[uuid]?.clear()
+        volatileStatuses[uuid]?.clear()
+
+        return true
+    }
+
+    /**
+     * Apply pending Baton Pass data to a newly switched-in Pokemon.
+     * Call this after registering the new Pokemon.
+     */
+    fun applyBatonPassIfPending(uuid: UUID) {
+        val isAlly = uuidIsAlly[uuid] ?: return
+        val batonData = pendingBatonPass.remove(isAlly) ?: return
+
+        // Apply stats
+        if (batonData.stats.isNotEmpty()) {
+            val pokemonStats = statChanges.computeIfAbsent(uuid) { ConcurrentHashMap() }
+            pokemonStats.putAll(batonData.stats)
+        }
+
+        // Apply volatiles (refresh their start turn to current turn)
+        if (batonData.volatiles.isNotEmpty()) {
+            val statuses = volatileStatuses.computeIfAbsent(uuid) { ConcurrentHashMap.newKeySet() }
+            val effectiveStartTurn = maxOf(1, currentTurn)
+            for (volatileState in batonData.volatiles) {
+                statuses.add(VolatileStatusState(volatileState.type, effectiveStartTurn))
+            }
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug(
+            "BattleStateTracker: Applied Baton Pass to UUID $uuid: " +
+            "${batonData.stats.size} stats, ${batonData.volatiles.size} volatiles"
+        )
+    }
+
+    /**
+     * Check if there's pending Baton Pass data for a side.
+     */
+    fun hasPendingBatonPass(isAlly: Boolean): Boolean = pendingBatonPass.containsKey(isAlly)
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Spectral Thief Handling
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Handle Spectral Thief: steal all positive stat boosts from target and add to user.
+     * The target's positive boosts are reset to 0, negative boosts remain.
+     */
+    fun stealPositiveStats(userPokemonName: String, targetPokemonName: String,
+                           userIsAlly: Boolean? = null, targetIsAlly: Boolean? = null) {
+        val userUuid = resolvePokemonUuid(userPokemonName, userIsAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown user '$userPokemonName' for Spectral Thief")
+            return
+        }
+        val targetUuid = resolvePokemonUuid(targetPokemonName, targetIsAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown target '$targetPokemonName' for Spectral Thief")
+            return
+        }
+
+        val targetStats = statChanges[targetUuid] ?: return
+        val userStats = statChanges.computeIfAbsent(userUuid) { ConcurrentHashMap() }
+
+        var stolenCount = 0
+        for (stat in BattleStat.entries) {
+            val targetValue = targetStats[stat] ?: 0
+            if (targetValue > 0) {
+                // Add to user's stats (capped at +6)
+                val userValue = userStats[stat] ?: 0
+                userStats[stat] = (userValue + targetValue).coerceIn(-6, 6)
+                // Clear target's positive boost
+                targetStats[stat] = 0
+                stolenCount++
+            }
+        }
+
+        if (stolenCount > 0) {
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "BattleStateTracker: $userPokemonName stole $stolenCount stat boosts from $targetPokemonName via Spectral Thief"
+            )
+        }
+    }
+
+    /**
+     * Resolve Pokemon name to UUID. For mirror matches, disambiguates via:
+     * 1. Owner prefix (e.g., "Player123's Togekiss")
+     * 2. preferAlly hint
+     * 3. First registered (fallback)
+     */
+    private fun resolvePokemonUuid(pokemonName: String, preferAlly: Boolean? = null): UUID? {
+        var lookupName = pokemonName.lowercase()
+        var ownerDeterminedSide: Boolean? = null  // true = ally, false = opponent
+
+        // Check for owner prefix (e.g., "Player126's Tyranitar" -> owner="Player126", pokemon="Tyranitar")
+        // This is the most reliable way to disambiguate in mirror matches
+        if (pokemonName.contains("'s ")) {
+            val ownerName = pokemonName.substringBefore("'s ").lowercase()
+            val strippedName = pokemonName.substringAfter("'s ").lowercase()
+
+            // Try to match owner name against known player names
+            val allyName = allyPlayerName
+            val oppName = opponentPlayerName
+
+            if (allyName != null && (ownerName == allyName || ownerName.contains(allyName) || allyName.contains(ownerName))) {
+                ownerDeterminedSide = true  // This is the ally's Pokemon
+                CobblemonExtendedBattleUI.LOGGER.debug(
+                    "BattleStateTracker: Owner '$ownerName' matched ally player '$allyName'"
+                )
+            } else if (oppName != null && (ownerName == oppName || ownerName.contains(oppName) || oppName.contains(ownerName))) {
+                ownerDeterminedSide = false  // This is the opponent's Pokemon
+                CobblemonExtendedBattleUI.LOGGER.debug(
+                    "BattleStateTracker: Owner '$ownerName' matched opponent player '$oppName'"
+                )
+            }
+
+            // Use stripped name for lookup
+            if (nameToUuids[lookupName] == null) {
+                lookupName = strippedName
+            }
+        }
+
+        val uuidList = nameToUuids[lookupName] ?: return null
+
+        // If only one Pokemon with this name, return it
+        if (uuidList.size == 1) {
+            return uuidList[0].first
+        }
+
+        // Multiple Pokemon with same name (mirror match) - need to disambiguate
+        if (uuidList.size > 1) {
+            // Priority: owner name match > preferAlly hint > fallback
+            val targetIsAlly = ownerDeterminedSide ?: preferAlly
+
+            if (targetIsAlly != null) {
+                // Find the Pokemon on the preferred side
+                val match = uuidList.find { it.second == targetIsAlly }
+                if (match != null) {
+                    val method = if (ownerDeterminedSide != null) "owner name" else "preferAlly hint"
+                    CobblemonExtendedBattleUI.LOGGER.debug(
+                        "BattleStateTracker: Resolved '$pokemonName' to ${if (targetIsAlly) "ally" else "opponent"} via $method"
+                    )
+                    return match.first
+                }
+            }
+
+            // Fallback: return the first one and log a warning
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "BattleStateTracker: Ambiguous Pokemon '$pokemonName' in mirror match, using first registered (ally=$allyPlayerName, opp=$opponentPlayerName)"
+            )
+            return uuidList[0].first
+        }
+
+        return null
     }
 
     private fun checkForExpiredConditions() {
@@ -476,22 +809,6 @@ object BattleStateTracker {
                     }
                 }
             }
-        }
-    }
-
-    private fun getStatFromName(name: String): Stat? {
-        val normalized = name.lowercase().trim()
-        return when {
-            normalized.contains("attack") && (normalized.contains("sp") || normalized.contains("special")) -> Stats.SPECIAL_ATTACK
-            normalized.contains("attack") -> Stats.ATTACK
-            normalized.contains("defense") && (normalized.contains("sp") || normalized.contains("special")) -> Stats.SPECIAL_DEFENCE
-            normalized.contains("defence") && (normalized.contains("sp") || normalized.contains("special")) -> Stats.SPECIAL_DEFENCE
-            normalized.contains("defense") -> Stats.DEFENCE
-            normalized.contains("defence") -> Stats.DEFENCE
-            normalized.contains("speed") -> Stats.SPEED
-            normalized.contains("evasion") || normalized.contains("evasiveness") -> Stats.EVASION
-            normalized.contains("accuracy") -> Stats.ACCURACY
-            else -> null
         }
     }
 }

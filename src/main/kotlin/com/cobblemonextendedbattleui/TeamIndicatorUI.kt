@@ -16,8 +16,11 @@ import java.util.concurrent.ConcurrentHashMap
  * Shows status conditions and KO'd Pokemon at a glance.
  *
  * Supports both participating in battles and spectating:
- * - When in battle: Uses client party storage for player's team, tracks opponent via battle data
+ * - When in battle: Uses battle actor's pokemon list for authoritative HP/status data
  * - When spectating: Uses battle data to track both sides as Pokemon are revealed
+ *
+ * Note: Uses battle data directly instead of client party storage to ensure
+ * correct updates on servers where party storage may not sync during battle.
  */
 object TeamIndicatorUI {
 
@@ -63,12 +66,9 @@ object TeamIndicatorUI {
         var isKO: Boolean
     )
 
-    // Track Pokemon for both sides separately (for spectating support)
+    // Track Pokemon for both sides separately (for spectating and opponent tracking)
     private val trackedSide1Pokemon = ConcurrentHashMap<UUID, TrackedPokemon>()
     private val trackedSide2Pokemon = ConcurrentHashMap<UUID, TrackedPokemon>()
-
-    // Also track by UUID for cross-referencing with player party
-    private val allTrackedPokemon = ConcurrentHashMap<UUID, TrackedPokemon>()
 
     private var lastBattleId: UUID? = null
 
@@ -78,7 +78,6 @@ object TeamIndicatorUI {
     fun clear() {
         trackedSide1Pokemon.clear()
         trackedSide2Pokemon.clear()
-        allTrackedPokemon.clear()
         lastBattleId = null
     }
 
@@ -100,71 +99,64 @@ object TeamIndicatorUI {
         // Determine if player is in the battle and which side they're on
         val playerInSide1 = battle.side1.actors.any { it.uuid == playerUUID }
         val playerInSide2 = battle.side2.actors.any { it.uuid == playerUUID }
-        val isSpectating = !playerInSide1 && !playerInSide2
 
-        // Determine left/right sides based on player position or default for spectating
-        val leftSide: ClientBattleSide
-        val rightSide: ClientBattleSide
-        val leftTracked: ConcurrentHashMap<UUID, TrackedPokemon>
-        val rightTracked: ConcurrentHashMap<UUID, TrackedPokemon>
-
-        if (playerInSide1) {
-            leftSide = battle.side1
-            rightSide = battle.side2
-            leftTracked = trackedSide1Pokemon
-            rightTracked = trackedSide2Pokemon
-        } else {
-            // Player is on side2, or spectating (default to side1 on left)
-            leftSide = if (isSpectating) battle.side1 else battle.side2
-            rightSide = if (isSpectating) battle.side2 else battle.side1
-            leftTracked = if (isSpectating) trackedSide1Pokemon else trackedSide2Pokemon
-            rightTracked = if (isSpectating) trackedSide2Pokemon else trackedSide1Pokemon
-        }
+        // In Cobblemon's BattleOverlay:
+        // - Side1 tiles are ALWAYS displayed on the LEFT of the screen
+        // - Side2 tiles are ALWAYS displayed on the RIGHT of the screen
+        // We must match this positioning for pokeballs to align with the battle tiles.
 
         // Update tracked Pokemon for both sides from battle data
-        updateTrackedPokemonForSide(leftSide, leftTracked)
-        updateTrackedPokemonForSide(rightSide, rightTracked)
+        updateTrackedPokemonForSide(battle.side1, trackedSide1Pokemon)
+        updateTrackedPokemonForSide(battle.side2, trackedSide2Pokemon)
 
         // Count active Pokemon for positioning (determines how many tiles are shown)
-        val leftActiveCount = leftSide.actors.sumOf { it.activePokemon.size }
-        val rightActiveCount = rightSide.actors.sumOf { it.activePokemon.size }
+        val side1ActiveCount = battle.side1.actors.sumOf { it.activePokemon.size }
+        val side2ActiveCount = battle.side2.actors.sumOf { it.activePokemon.size }
 
-        val leftY = calculatePokeballY(leftActiveCount)
-        val rightY = calculatePokeballY(rightActiveCount)
+        val leftY = calculatePokeballY(side1ActiveCount)
+        val rightY = calculatePokeballY(side2ActiveCount)
 
-        // Render left side (player's side when in battle, side1 when spectating)
-        if (!isSpectating) {
-            // Player is in battle - use client storage for full party view,
-            // but cross-reference with battle data for accurate HP/status
-            val playerParty = CobblemonClient.storage.party
-            val playerTeam = playerParty.slots.filterNotNull()
-            renderPlayerTeamWithBattleData(context, HORIZONTAL_INSET, leftY, playerTeam)
+        // Find the player's actor if they're in the battle
+        val playerActor = battle.side1.actors.find { it.uuid == playerUUID }
+            ?: battle.side2.actors.find { it.uuid == playerUUID }
+
+        // Render LEFT side (side1) - player's team if they're on side1, otherwise tracked
+        if (playerInSide1 && playerActor != null) {
+            // Player is on side1 (left) - use battle actor's pokemon list for authoritative data
+            val playerTeam = playerActor.pokemon
+            renderBattleTeam(context, HORIZONTAL_INSET, leftY, playerTeam)
         } else {
-            // Spectating - use tracked Pokemon from battle data
-            val leftTeam = leftTracked.values.toList()
-            if (leftTeam.isNotEmpty()) {
-                renderTrackedTeam(context, HORIZONTAL_INSET, leftY, leftTeam)
+            // Side1 is opponent or we're spectating - use tracked Pokemon from battle data
+            val side1Team = trackedSide1Pokemon.values.toList()
+            if (side1Team.isNotEmpty()) {
+                renderTrackedTeam(context, HORIZONTAL_INSET, leftY, side1Team)
             }
         }
 
-        // Render right side (always use tracked data from battle)
-        val rightTeam = rightTracked.values.toList()
-        if (rightTeam.isNotEmpty()) {
-            val rightWidth = rightTeam.size * (BALL_SIZE + BALL_SPACING) - BALL_SPACING
-            renderTrackedTeam(context, screenWidth - HORIZONTAL_INSET - rightWidth, rightY, rightTeam)
+        // Render RIGHT side (side2) - player's team if they're on side2, otherwise tracked
+        if (playerInSide2 && playerActor != null) {
+            // Player is on side2 (right) - use battle actor's pokemon list for authoritative data
+            val playerTeam = playerActor.pokemon
+            val rightWidth = playerTeam.size * (BALL_SIZE + BALL_SPACING) - BALL_SPACING
+            renderBattleTeam(context, screenWidth - HORIZONTAL_INSET - rightWidth, rightY, playerTeam)
+        } else {
+            // Side2 is opponent or we're spectating - use tracked Pokemon from battle data
+            val side2Team = trackedSide2Pokemon.values.toList()
+            if (side2Team.isNotEmpty()) {
+                val rightWidth = side2Team.size * (BALL_SIZE + BALL_SPACING) - BALL_SPACING
+                renderTrackedTeam(context, screenWidth - HORIZONTAL_INSET - rightWidth, rightY, side2Team)
+            }
         }
     }
 
     /**
-     * Update tracked Pokemon for a battle side.
+     * Update tracked Pokemon for a battle side (used for opponent and spectator views).
      */
     private fun updateTrackedPokemonForSide(side: ClientBattleSide, tracked: ConcurrentHashMap<UUID, TrackedPokemon>) {
         for (actor in side.actors) {
             for (activePokemon in actor.activePokemon) {
                 val battlePokemon = activePokemon.battlePokemon ?: continue
                 updateTrackedPokemonInMap(battlePokemon, tracked)
-                // Also update the global map for cross-referencing
-                updateTrackedPokemonInMap(battlePokemon, allTrackedPokemon)
             }
         }
     }
@@ -213,28 +205,16 @@ object TeamIndicatorUI {
     }
 
     /**
-     * Render player team using client party data, but cross-reference with battle data
-     * for more accurate HP/status information during battle.
+     * Render a team using battle actor's pokemon list.
+     * This uses authoritative battle data which works correctly on servers.
      */
-    private fun renderPlayerTeamWithBattleData(context: DrawContext, startX: Int, startY: Int, team: List<Pokemon>) {
+    private fun renderBattleTeam(context: DrawContext, startX: Int, startY: Int, team: List<Pokemon>) {
         var x = startX
 
         for (pokemon in team) {
-            // Try to get battle data for this Pokemon for more accurate HP/status
-            val battleData = allTrackedPokemon[pokemon.uuid]
-
-            val isKO: Boolean
-            val status: Status?
-
-            if (battleData != null) {
-                // Use battle data (more accurate during battle)
-                isKO = battleData.isKO
-                status = battleData.status
-            } else {
-                // Fall back to party data (Pokemon hasn't been in battle yet, or no battle data)
-                isKO = pokemon.currentHealth <= 0
-                status = pokemon.status?.status
-            }
+            // Use battle-authoritative data directly
+            val isKO = pokemon.currentHealth <= 0
+            val status = pokemon.status?.status
 
             val (topColor, bottomColor, bandColor, centerColor) = when {
                 isKO -> Quad(COLOR_KO_TOP, COLOR_KO_BOTTOM, COLOR_KO_BAND, COLOR_KO_CENTER)

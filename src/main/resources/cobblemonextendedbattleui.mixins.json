@@ -9,6 +9,8 @@
     "BattleEndHandlerMixin",
     "BattleMessagePaneMixin",
     "BattleHealthChangeHandlerMixin",
+    "BattleSwitchHandlerMixin",
+    "BattleInitializeHandlerMixin",
     "MouseScrollMixin"
   ],
   "injectors": {

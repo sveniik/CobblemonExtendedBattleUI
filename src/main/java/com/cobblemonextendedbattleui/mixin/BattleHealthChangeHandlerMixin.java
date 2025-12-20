@@ -13,13 +13,19 @@ import com.cobblemon.mod.common.net.messages.client.battle.BattleHealthChangePac
 import com.cobblemonextendedbattleui.DamageTracker;
 import net.minecraft.client.MinecraftClient;
 
+import java.util.UUID;
+
 /**
  * Intercepts HP changes to track damage/healing percentages for the battle log.
  *
- * Uses DamageTracker to maintain our own HP tracking per Pokemon (by PNX identifier).
- * This fixes issues with multi-hit moves where Cobblemon's stored HP value may not
- * update between rapid successive packets, causing incorrect damage calculations
- * (e.g., each hit showing damage from original HP instead of progressively reduced HP).
+ * Uses DamageTracker to maintain HP tracking per Pokemon by UUID. HP baselines are
+ * pre-populated when Pokemon switch in (via BattleSwitchHandlerMixin), ensuring we
+ * always have an accurate baseline for damage calculations.
+ *
+ * This approach handles:
+ * - Multi-hit moves: Each hit uses the correct previous HP value
+ * - Switch-ins: HP is captured from the switch packet before any changes
+ * - Slot reuse: UUID tracking prevents confusion when different Pokemon occupy the same slot
  */
 @Mixin(value = BattleHealthChangeHandler.class, remap = false)
 public class BattleHealthChangeHandlerMixin {
@@ -36,6 +42,7 @@ public class BattleHealthChangeHandlerMixin {
             ClientBattlePokemon pokemon = activePokemon.getBattlePokemon();
 
             if (pokemon != null) {
+                UUID uuid = pokemon.getUuid();
                 float maxHp = pokemon.getMaxHp();
                 float newHpValue = packet.getNewHealth();
                 boolean isFlat = pokemon.isHpFlat();
@@ -49,27 +56,23 @@ public class BattleHealthChangeHandlerMixin {
                     newPercent = newHpValue * 100f;
                 }
 
-                // Get old HP percentage - prefer our tracked value for accuracy,
-                // fall back to Cobblemon's value only on first encounter
-                Float trackedOldPercent = DamageTracker.INSTANCE.getLastKnownHpPercent(pnx);
-                float oldPercent;
+                // Get old HP percentage from our tracking (should be pre-populated by switch handler)
+                Float trackedOldPercent = DamageTracker.INSTANCE.getLastKnownHpPercent(uuid);
 
-                if (trackedOldPercent != null) {
-                    // Use our tracked value (handles multi-hit moves correctly)
-                    oldPercent = trackedOldPercent;
-                } else {
-                    // First time seeing this Pokemon - use Cobblemon's current value
-                    float oldHpValue = pokemon.getHpValue();
-                    if (isFlat && maxHp > 0) {
-                        oldPercent = (oldHpValue / maxHp) * 100f;
-                    } else {
-                        oldPercent = oldHpValue * 100f;
-                    }
+                if (trackedOldPercent == null) {
+                    // Edge case: HP change arrived before switch handler ran, or for initial battle Pokemon.
+                    // Use the packet's new value as our baseline for future changes.
+                    // This should rarely happen now that we have switch-in pre-population.
+                    DamageTracker.INSTANCE.updateHpPercent(uuid, newPercent);
+                    return;
                 }
+
+                // We have a tracked baseline - calculate the HP change
+                float oldPercent = trackedOldPercent;
 
                 // Update our tracking with the new percentage BEFORE calculating damage
                 // This ensures subsequent packets in a multi-hit move use the correct base
-                DamageTracker.INSTANCE.updateHpPercent(pnx, newPercent);
+                DamageTracker.INSTANCE.updateHpPercent(uuid, newPercent);
 
                 float hpChange = oldPercent - newPercent;
                 String pokemonName = pokemon.getDisplayName().getString();

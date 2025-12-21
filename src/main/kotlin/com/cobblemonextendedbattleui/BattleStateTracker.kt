@@ -404,6 +404,7 @@ object BattleStateTracker {
         val existingEntry = uuidList.find { it.first == uuid }
         if (existingEntry == null) {
             uuidList.add(Pair(uuid, isAlly))
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Registered '$name' (${if (isAlly) "ally" else "opponent"}) with UUID $uuid")
         } else if (existingEntry.second != isAlly) {
             // Update ally status if it changed (shouldn't happen, but be safe)
             uuidList.remove(existingEntry)

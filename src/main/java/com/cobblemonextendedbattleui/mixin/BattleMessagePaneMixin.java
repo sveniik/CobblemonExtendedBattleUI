@@ -10,8 +10,8 @@ import com.cobblemonextendedbattleui.PanelConfig;
 import net.minecraft.client.gui.DrawContext;
 
 /**
- * Mixin to hide Cobblemon's BattleMessagePane when we're using our custom battle log.
- * This prevents the empty box from rendering while we display our own enhanced log.
+ * Mixin to hide Cobblemon's BattleMessagePane when our custom battle log is enabled.
+ * This prevents Cobblemon's log from rendering while we display our own enhanced log.
  *
  * Note: BattleMessagePane is a Cobblemon class so its name won't be remapped.
  * The method renderWidget and DrawContext WILL be remapped to intermediary names in production.
@@ -20,8 +20,8 @@ import net.minecraft.client.gui.DrawContext;
 public class BattleMessagePaneMixin {
 
     /**
-     * Intercept the renderWidget method and skip it entirely when replaceBattleLog is enabled.
-     * BattleMessagePane extends AlwaysSelectedEntryListWidget which uses renderWidget for rendering.
+     * Intercept the renderWidget method and skip it entirely when our battle log is enabled.
+     * When enableBattleLog is false, Cobblemon's native log will be shown instead.
      */
     @Inject(
         method = "renderWidget(Lnet/minecraft/client/gui/DrawContext;IIF)V",
@@ -29,7 +29,7 @@ public class BattleMessagePaneMixin {
         cancellable = true
     )
     private void onRenderWidget(DrawContext context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
-        if (PanelConfig.INSTANCE.getReplaceBattleLog()) {
+        if (PanelConfig.INSTANCE.getEnableBattleLog()) {
             ci.cancel();
         }
     }

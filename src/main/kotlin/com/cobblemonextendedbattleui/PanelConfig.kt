@@ -16,6 +16,22 @@ object PanelConfig {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Feature toggles (disable entire features)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Enable/disable team indicator displays under health bars
+    var enableTeamIndicators: Boolean = true
+        private set
+
+    // Enable/disable the battle info panel (weather, terrain, conditions, stats)
+    var enableBattleInfoPanel: Boolean = true
+        private set
+
+    // Enable/disable the custom battle log (replaces Cobblemon's chat-based log)
+    var enableBattleLog: Boolean = true
+        private set
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Configuration values
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -48,10 +64,6 @@ object PanelConfig {
     // ═══════════════════════════════════════════════════════════════════════════
     // Battle log widget settings
     // ═══════════════════════════════════════════════════════════════════════════
-
-    // Whether to replace Cobblemon's battle log with our custom log
-    var replaceBattleLog: Boolean = true
-        private set
 
     // Log widget position (null = default bottom-center position)
     var logX: Int? = null
@@ -106,6 +118,11 @@ object PanelConfig {
     // ═══════════════════════════════════════════════════════════════════════════
 
     data class ConfigData(
+        // Feature toggles
+        val enableTeamIndicators: Boolean = true,
+        val enableBattleInfoPanel: Boolean = true,
+        val enableBattleLog: Boolean = true,
+        // Panel settings
         val panelX: Int? = null,
         val panelY: Int? = null,
         val panelWidth: Int? = null,
@@ -113,7 +130,6 @@ object PanelConfig {
         val fontScale: Float = 1.0f,
         val startExpanded: Boolean = false,
         // Battle log widget settings
-        val replaceBattleLog: Boolean = true,
         val logX: Int? = null,
         val logY: Int? = null,
         val logWidth: Int? = null,
@@ -128,6 +144,11 @@ object PanelConfig {
         try {
             if (configFile.exists()) {
                 val data = gson.fromJson(configFile.readText(), ConfigData::class.java)
+                // Feature toggles
+                enableTeamIndicators = data.enableTeamIndicators
+                enableBattleInfoPanel = data.enableBattleInfoPanel
+                enableBattleLog = data.enableBattleLog
+                // Panel settings
                 panelX = data.panelX
                 panelY = data.panelY
                 panelWidth = data.panelWidth
@@ -135,7 +156,6 @@ object PanelConfig {
                 fontScale = data.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
                 startExpanded = data.startExpanded
                 // Battle log widget settings
-                replaceBattleLog = data.replaceBattleLog
                 logX = data.logX
                 logY = data.logY
                 logWidth = data.logWidth
@@ -143,7 +163,7 @@ object PanelConfig {
                 logFontScale = data.logFontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
                 logExpanded = data.logExpanded
                 tooltipFontScale = data.tooltipFontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
-                CobblemonExtendedBattleUI.LOGGER.info("PanelConfig: Loaded config - panel pos=(${panelX}, ${panelY}), log pos=(${logX}, ${logY})")
+                CobblemonExtendedBattleUI.LOGGER.info("PanelConfig: Loaded config - features: team=$enableTeamIndicators, panel=$enableBattleInfoPanel, log=$enableBattleLog")
             }
         } catch (e: Exception) {
             CobblemonExtendedBattleUI.LOGGER.warn("PanelConfig: Failed to load config, using defaults: ${e.message}")
@@ -153,13 +173,15 @@ object PanelConfig {
     fun save() {
         try {
             val data = ConfigData(
+                enableTeamIndicators = enableTeamIndicators,
+                enableBattleInfoPanel = enableBattleInfoPanel,
+                enableBattleLog = enableBattleLog,
                 panelX = panelX,
                 panelY = panelY,
                 panelWidth = panelWidth,
                 panelHeight = panelHeight,
                 fontScale = fontScale,
                 startExpanded = startExpanded,
-                replaceBattleLog = replaceBattleLog,
                 logX = logX,
                 logY = logY,
                 logWidth = logWidth,
@@ -232,11 +254,20 @@ object PanelConfig {
         logExpanded = expanded
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Feature toggle helpers (for mixins to check tracking dependencies)
+    // ═══════════════════════════════════════════════════════════════════════════
+
     /**
-     * Toggle the replaceBattleLog setting.
+     * Returns true if BattleStateTracker should process messages.
+     * Needed for both battle info panel (weather, terrain, conditions, stats)
+     * and team indicator tooltips (stat changes, volatile statuses).
      */
-    fun toggleReplaceBattleLog() {
-        replaceBattleLog = !replaceBattleLog
-        save()
-    }
+    fun needsBattleStateTracking(): Boolean = enableBattleInfoPanel || enableTeamIndicators
+
+    /**
+     * Returns true if DamageTracker should track HP changes.
+     * Only needed for battle log damage/healing percentages.
+     */
+    fun needsDamageTracking(): Boolean = enableBattleLog
 }

@@ -153,7 +153,7 @@ object BattleLogWidget {
      * Check if mouse is currently over the battle log widget.
      */
     fun isMouseOverWidget(): Boolean {
-        if (!PanelConfig.replaceBattleLog) return false
+        if (!PanelConfig.enableBattleLog) return false
         val mc = MinecraftClient.getInstance()
         val mouseX = (mc.mouse.x * mc.window.scaledWidth / mc.window.width).toInt()
         val mouseY = (mc.mouse.y * mc.window.scaledHeight / mc.window.height).toInt()
@@ -162,7 +162,7 @@ object BattleLogWidget {
     }
 
     fun render(context: DrawContext) {
-        if (!PanelConfig.replaceBattleLog) return
+        if (!PanelConfig.enableBattleLog) return
         val battle = CobblemonClient.battle ?: return
         if (battle.minimised) return
 
@@ -214,7 +214,7 @@ object BattleLogWidget {
     }
 
     fun onScroll(mouseX: Double, mouseY: Double, deltaY: Double): Boolean {
-        if (!PanelConfig.replaceBattleLog) return false
+        if (!PanelConfig.enableBattleLog) return false
 
         val mc = MinecraftClient.getInstance()
         val scaledX = (mouseX * mc.window.scaledWidth / mc.window.width).toInt()

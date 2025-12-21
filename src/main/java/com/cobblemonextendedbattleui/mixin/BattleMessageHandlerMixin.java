@@ -15,28 +15,30 @@ import net.minecraft.client.MinecraftClient;
 /**
  * Mixin to intercept battle messages for state tracking and custom battle log.
  *
- * When replaceBattleLog is enabled, this mixin will:
- * 1. Process messages for state tracking (weather, terrain, stats, etc.)
- * 2. Store messages in our custom BattleLog
- * 3. Cancel the default handler to prevent Cobblemon from showing messages in chat
+ * Conditionally processes messages based on enabled features:
+ * - BattleMessageInterceptor: Updates BattleStateTracker (needed for panel + tooltips)
+ * - BattleLog: Stores messages for custom battle log widget
+ * - Cancels default handler when our battle log is enabled (hides Cobblemon's chat log)
  */
 @Mixin(value = BattleMessageHandler.class, remap = false)
 public class BattleMessageHandlerMixin {
 
     /**
      * Inject at the start of handle() to process messages before they're displayed.
-     * When replaceBattleLog is enabled, we cancel the default handling entirely.
+     * Only processes tracking that's needed for enabled features.
      */
     @Inject(method = "handle", at = @At("HEAD"), cancellable = true)
     private void onHandle(BattleMessagePacket packet, MinecraftClient client, CallbackInfo ci) {
-        // Always process messages for state tracking (weather, terrain, stats, etc.)
-        BattleMessageInterceptor.INSTANCE.processMessages(packet.getMessages());
+        // Process messages for state tracking only if panel or team indicators are enabled
+        boolean needsStateTracking = PanelConfig.INSTANCE.needsBattleStateTracking();
+        if (needsStateTracking) {
+            BattleMessageInterceptor.INSTANCE.processMessages(packet.getMessages());
+        }
 
-        // Always store messages in our battle log
-        BattleLog.INSTANCE.processMessages(packet.getMessages());
-
-        // If replaceBattleLog is enabled, prevent Cobblemon from showing messages in chat
-        if (PanelConfig.INSTANCE.getReplaceBattleLog()) {
+        // Store messages in battle log only if the battle log feature is enabled
+        if (PanelConfig.INSTANCE.getEnableBattleLog()) {
+            BattleLog.INSTANCE.processMessages(packet.getMessages());
+            // Also prevent Cobblemon from showing messages in chat (we show our own log)
             ci.cancel();
         }
     }

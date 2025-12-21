@@ -9,6 +9,7 @@ import com.cobblemon.mod.common.client.net.battle.BattleInitializeHandler;
 import com.cobblemon.mod.common.net.messages.client.battle.BattleInitializePacket;
 import com.cobblemonextendedbattleui.BattleStateTracker;
 import com.cobblemonextendedbattleui.DamageTracker;
+import com.cobblemonextendedbattleui.PanelConfig;
 import net.minecraft.client.MinecraftClient;
 
 import java.util.UUID;
@@ -16,18 +17,21 @@ import java.util.UUID;
 /**
  * Intercepts battle initialization to pre-populate HP baselines and register Pokemon.
  *
- * When a battle starts, all Pokemon on the field have their HP captured here.
- * This ensures we have accurate HP baselines before any HP change packets arrive,
- * which is critical for correctly calculating damage during the first turn.
- *
- * Also registers Pokemon with BattleStateTracker early so that historical battle
- * messages (when spectating) can correctly apply stat changes and other effects.
+ * Conditionally initializes tracking based on enabled features:
+ * - DamageTracker HP baselines: Only when battle log is enabled
+ * - BattleStateTracker Pokemon registration: Only when panel or team indicators are enabled
  */
 @Mixin(value = BattleInitializeHandler.class, remap = false)
 public class BattleInitializeHandlerMixin {
 
     @Inject(method = "handle", at = @At("HEAD"))
     private void onHandlePre(BattleInitializePacket packet, MinecraftClient client, CallbackInfo ci) {
+        boolean needsStateTracking = PanelConfig.INSTANCE.needsBattleStateTracking();
+        boolean needsDamageTracking = PanelConfig.INSTANCE.needsDamageTracking();
+
+        // Skip entirely if no features need initialization
+        if (!needsStateTracking && !needsDamageTracking) return;
+
         try {
             // Determine if player is spectating
             UUID playerUUID = client.getSession().getUuidOrNull();
@@ -35,28 +39,29 @@ public class BattleInitializeHandlerMixin {
             boolean isPlayerInSide2 = isPlayerInSide(packet.getSide2(), playerUUID);
             boolean isSpectating = !isPlayerInSide1 && !isPlayerInSide2;
 
-            // Set spectator mode in tracker
-            BattleStateTracker.INSTANCE.setSpectating(isSpectating);
-
-            // Get player names for disambiguation in mirror matches
-            String side1PlayerName = getFirstActorName(packet.getSide1());
-            String side2PlayerName = getFirstActorName(packet.getSide2());
-
             // For participants: side1 is ally if player is in side1
             // For spectators: side1 is treated as "ally" (left side)
             boolean side1IsAlly = isPlayerInSide1 || isSpectating;
 
-            if (side1PlayerName != null && side2PlayerName != null) {
-                if (side1IsAlly) {
-                    BattleStateTracker.INSTANCE.setPlayerNames(side1PlayerName, side2PlayerName);
-                } else {
-                    BattleStateTracker.INSTANCE.setPlayerNames(side2PlayerName, side1PlayerName);
+            // Only set up BattleStateTracker if needed
+            if (needsStateTracking) {
+                BattleStateTracker.INSTANCE.setSpectating(isSpectating);
+
+                String side1PlayerName = getFirstActorName(packet.getSide1());
+                String side2PlayerName = getFirstActorName(packet.getSide2());
+
+                if (side1PlayerName != null && side2PlayerName != null) {
+                    if (side1IsAlly) {
+                        BattleStateTracker.INSTANCE.setPlayerNames(side1PlayerName, side2PlayerName);
+                    } else {
+                        BattleStateTracker.INSTANCE.setPlayerNames(side2PlayerName, side1PlayerName);
+                    }
                 }
             }
 
-            // Initialize and register Pokemon from both sides
-            initializePokemonFromSide(packet.getSide1(), side1IsAlly);
-            initializePokemonFromSide(packet.getSide2(), !side1IsAlly);
+            // Initialize Pokemon from both sides (conditionally based on needed tracking)
+            initializePokemonFromSide(packet.getSide1(), side1IsAlly, needsStateTracking, needsDamageTracking);
+            initializePokemonFromSide(packet.getSide2(), !side1IsAlly, needsStateTracking, needsDamageTracking);
         } catch (Exception e) {
             // Silent fail to avoid breaking gameplay
         }
@@ -82,7 +87,8 @@ public class BattleInitializeHandlerMixin {
         return null;
     }
 
-    private void initializePokemonFromSide(BattleInitializePacket.BattleSideDTO side, boolean isAlly) {
+    private void initializePokemonFromSide(BattleInitializePacket.BattleSideDTO side, boolean isAlly,
+                                           boolean needsStateTracking, boolean needsDamageTracking) {
         if (side == null) return;
 
         for (BattleInitializePacket.BattleActorDTO actor : side.getActors()) {
@@ -92,17 +98,20 @@ public class BattleInitializeHandlerMixin {
                 if (pokemon == null) continue;
 
                 UUID uuid = pokemon.getUuid();
-                float hpValue = pokemon.getHpValue();
-                float maxHp = pokemon.getMaxHp();
-                boolean isFlat = pokemon.isFlatHp();
-                String name = pokemon.getDisplayName() != null ? pokemon.getDisplayName().getString() : "Unknown";
 
-                // Pre-populate the HP tracker with the initial HP value
-                DamageTracker.INSTANCE.initializeHpFromSwitch(uuid, hpValue, maxHp, isFlat);
+                // Pre-populate the HP tracker only if battle log needs damage percentages
+                if (needsDamageTracking) {
+                    float hpValue = pokemon.getHpValue();
+                    float maxHp = pokemon.getMaxHp();
+                    boolean isFlat = pokemon.isFlatHp();
+                    DamageTracker.INSTANCE.initializeHpFromSwitch(uuid, hpValue, maxHp, isFlat);
+                }
 
-                // Register Pokemon with BattleStateTracker so historical messages
-                // can apply stat changes correctly (critical for spectator mode)
-                BattleStateTracker.INSTANCE.registerPokemon(uuid, name, isAlly);
+                // Register Pokemon with BattleStateTracker only if panel/tooltips need it
+                if (needsStateTracking) {
+                    String name = pokemon.getDisplayName() != null ? pokemon.getDisplayName().getString() : "Unknown";
+                    BattleStateTracker.INSTANCE.registerPokemon(uuid, name, isAlly);
+                }
             }
         }
     }

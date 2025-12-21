@@ -79,6 +79,32 @@ You can rebind keys in the Minecraft keybind settings menu.
 
 Your preferences for panel/log size, position, and font sizes are saved automatically.
 
+## Configuration
+
+You can disable individual features by editing the config file. This requires a game restart to take effect.
+
+**Config file location:** `.minecraft/config/cobblemonextendedbattleui.json`
+
+### Feature Toggles
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `enableTeamIndicators` | `true` | Pokemon model indicators below health bars with hover tooltips |
+| `enableBattleInfoPanel` | `true` | Weather, terrain, field effects, stat changes panel |
+| `enableBattleLog` | `true` | Custom battle log with damage percentages (replaces Cobblemon's chat log) |
+
+### Example: Disable Battle Log Only
+
+```json
+{
+  "enableTeamIndicators": true,
+  "enableBattleInfoPanel": true,
+  "enableBattleLog": false
+}
+```
+
+When a feature is disabled, its associated background tracking is also disabled to save resources. Note that stat change tracking is shared between the Battle Info Panel and Team Indicator tooltips - it remains active if either feature is enabled.
+
 ## Requirements
 
 - Minecraft 1.21.1

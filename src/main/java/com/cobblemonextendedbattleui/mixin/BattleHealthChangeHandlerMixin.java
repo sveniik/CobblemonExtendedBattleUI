@@ -13,6 +13,7 @@ import com.cobblemon.mod.common.net.messages.client.battle.BattleHealthChangePac
 import com.cobblemonextendedbattleui.DamageTracker;
 import com.cobblemonextendedbattleui.TeamIndicatorUI;
 import com.cobblemonextendedbattleui.BattleStateTracker;
+import com.cobblemonextendedbattleui.PanelConfig;
 import net.minecraft.client.MinecraftClient;
 
 import java.util.UUID;
@@ -24,16 +25,22 @@ import java.util.UUID;
  * pre-populated when Pokemon switch in (via BattleSwitchHandlerMixin), ensuring we
  * always have an accurate baseline for damage calculations.
  *
- * This approach handles:
- * - Multi-hit moves: Each hit uses the correct previous HP value
- * - Switch-ins: HP is captured from the switch packet before any changes
- * - Slot reuse: UUID tracking prevents confusion when different Pokemon occupy the same slot
+ * Conditionally processes tracking based on enabled features:
+ * - DamageTracker: Only when battle log is enabled (for damage percentages)
+ * - TeamIndicatorUI KO tracking: Only when team indicators are enabled
+ * - BattleStateTracker KO tracking: Only when panel or team indicators are enabled
  */
 @Mixin(value = BattleHealthChangeHandler.class, remap = false)
 public class BattleHealthChangeHandlerMixin {
 
     @Inject(method = "handle", at = @At("HEAD"))
     private void onHandlePre(BattleHealthChangePacket packet, MinecraftClient client, CallbackInfo ci) {
+        // Skip entirely if no features need HP tracking
+        boolean needsDamage = PanelConfig.INSTANCE.needsDamageTracking();
+        boolean needsKOTracking = PanelConfig.INSTANCE.needsBattleStateTracking() ||
+                                   PanelConfig.INSTANCE.getEnableTeamIndicators();
+        if (!needsDamage && !needsKOTracking) return;
+
         ClientBattle battle = CobblemonClient.INSTANCE.getBattle();
         if (battle == null) return;
 
@@ -58,38 +65,35 @@ public class BattleHealthChangeHandlerMixin {
                     newPercent = newHpValue * 100f;
                 }
 
-                // Get old HP percentage from our tracking (should be pre-populated by switch handler)
-                Float trackedOldPercent = DamageTracker.INSTANCE.getLastKnownHpPercent(uuid);
+                // Only track HP changes if battle log needs damage percentages
+                if (needsDamage) {
+                    Float trackedOldPercent = DamageTracker.INSTANCE.getLastKnownHpPercent(uuid);
 
-                if (trackedOldPercent == null) {
-                    // Edge case: HP change arrived before switch handler ran, or for initial battle Pokemon.
-                    // Use the packet's new value as our baseline for future changes.
-                    // This should rarely happen now that we have switch-in pre-population.
-                    DamageTracker.INSTANCE.updateHpPercent(uuid, newPercent);
-                    return;
+                    if (trackedOldPercent == null) {
+                        DamageTracker.INSTANCE.updateHpPercent(uuid, newPercent);
+                    } else {
+                        float oldPercent = trackedOldPercent;
+                        DamageTracker.INSTANCE.updateHpPercent(uuid, newPercent);
+
+                        float hpChange = oldPercent - newPercent;
+                        String pokemonName = pokemon.getDisplayName().getString();
+
+                        if (hpChange > 0.5f) {
+                            DamageTracker.INSTANCE.recordDamage(pokemonName, hpChange);
+                        } else if (hpChange < -0.5f) {
+                            DamageTracker.INSTANCE.recordHealing(pokemonName, -hpChange);
+                        }
+                    }
                 }
 
-                // We have a tracked baseline - calculate the HP change
-                float oldPercent = trackedOldPercent;
-
-                // Update our tracking with the new percentage BEFORE calculating damage
-                // This ensures subsequent packets in a multi-hit move use the correct base
-                DamageTracker.INSTANCE.updateHpPercent(uuid, newPercent);
-
-                // Detect KO at the exact moment HP reaches 0
-                // This is more reliable than waiting for the faint message
-                if (newPercent <= 0) {
-                    TeamIndicatorUI.INSTANCE.markPokemonAsKO(uuid);
-                    BattleStateTracker.INSTANCE.markAsKO(uuid);
-                }
-
-                float hpChange = oldPercent - newPercent;
-                String pokemonName = pokemon.getDisplayName().getString();
-
-                if (hpChange > 0.5f) {
-                    DamageTracker.INSTANCE.recordDamage(pokemonName, hpChange);
-                } else if (hpChange < -0.5f) {
-                    DamageTracker.INSTANCE.recordHealing(pokemonName, -hpChange);
+                // Track KO at the moment HP reaches 0 (only if needed by enabled features)
+                if (newPercent <= 0 && needsKOTracking) {
+                    if (PanelConfig.INSTANCE.getEnableTeamIndicators()) {
+                        TeamIndicatorUI.INSTANCE.markPokemonAsKO(uuid);
+                    }
+                    if (PanelConfig.INSTANCE.needsBattleStateTracking()) {
+                        BattleStateTracker.INSTANCE.markAsKO(uuid);
+                    }
                 }
             }
         } catch (Exception e) {

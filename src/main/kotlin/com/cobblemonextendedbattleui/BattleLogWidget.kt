@@ -149,6 +149,18 @@ object BattleLogWidget {
     // Public API
     // ═══════════════════════════════════════════════════════════════════════════
 
+    /**
+     * Check if mouse is currently over the battle log widget.
+     */
+    fun isMouseOverWidget(): Boolean {
+        if (!PanelConfig.replaceBattleLog) return false
+        val mc = MinecraftClient.getInstance()
+        val mouseX = (mc.mouse.x * mc.window.scaledWidth / mc.window.width).toInt()
+        val mouseY = (mc.mouse.y * mc.window.scaledHeight / mc.window.height).toInt()
+        return mouseX >= widgetX && mouseX <= widgetX + widgetW &&
+               mouseY >= widgetY && mouseY <= widgetY + widgetH
+    }
+
     fun render(context: DrawContext) {
         if (!PanelConfig.replaceBattleLog) return
         val battle = CobblemonClient.battle ?: return

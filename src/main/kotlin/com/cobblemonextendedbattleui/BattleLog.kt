@@ -154,25 +154,58 @@ object BattleLog {
 
     /**
      * Process a list of battle messages and add them to the log.
+     * Uses two-pass approach to correctly assign turns even when turn messages
+     * appear after action messages in the same batch.
      */
     fun processMessages(messages: List<Text>) {
-        currentTurn = BattleStateTracker.currentTurn
+        if (messages.isEmpty()) return
 
-        for (message in messages) {
+        // PASS 1: Find all turn markers and their positions in the message list
+        val turnPositions = mutableListOf<Pair<Int, Int>>()  // (messageIndex, turnNumber)
+        for ((index, message) in messages.withIndex()) {
+            val key = extractTranslationKey(message)
+            if (key == TURN_KEY) {
+                extractTurnNumber(message)?.let { turn ->
+                    turnPositions.add(index to turn)
+                }
+            }
+        }
+
+        // Determine starting turn:
+        // - If first message is a turn marker, use that turn
+        // - Otherwise, use the current turn from BattleStateTracker
+        var effectiveTurn = if (turnPositions.isNotEmpty() && turnPositions[0].first == 0) {
+            turnPositions[0].second
+        } else {
+            BattleStateTracker.currentTurn
+        }
+
+        // PASS 2: Process messages with correct turn assignments
+        var nextTurnIdx = 0
+        for ((index, message) in messages.withIndex()) {
+            // Advance to the correct turn when we reach or pass a turn marker
+            while (nextTurnIdx < turnPositions.size && turnPositions[nextTurnIdx].first <= index) {
+                effectiveTurn = turnPositions[nextTurnIdx].second
+                nextTurnIdx++
+            }
+
             val key = extractTranslationKey(message)
             val type = categorizeMessage(key)
 
-            // For turn markers, update currentTurn
-            if (key == TURN_KEY) {
-                extractTurnNumber(message)?.let { currentTurn = it }
-            }
-
             addEntry(LogEntry(
-                turn = currentTurn,
+                turn = effectiveTurn,
                 type = type,
                 message = message,
                 translationKey = key
             ))
+        }
+
+        // Update currentTurn with the final turn from this batch
+        if (turnPositions.isNotEmpty()) {
+            currentTurn = turnPositions.last().second
+        } else if (messages.isNotEmpty()) {
+            // No turn markers in batch, but update to match effective turn
+            currentTurn = effectiveTurn
         }
     }
 

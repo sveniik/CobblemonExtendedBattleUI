@@ -11,5 +11,8 @@ object BattleInfoRenderer {
         TeamIndicatorUI.render(context)
         BattleInfoPanel.render(context)
         BattleLogWidget.render(context)
+
+        // Tooltip renders LAST to appear on top of everything
+        TeamIndicatorUI.renderHoverTooltip(context)
     }
 }

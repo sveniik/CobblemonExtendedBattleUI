@@ -30,6 +30,15 @@ object BattleStateTracker {
     var currentTurn: Int = 0
         private set
 
+    // Track if player is spectating (not participating in the battle)
+    var isSpectating: Boolean = false
+        private set
+
+    fun setSpectating(spectating: Boolean) {
+        isSpectating = spectating
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Spectating mode = $spectating")
+    }
+
     fun checkBattleChanged(battleId: UUID) {
         if (lastBattleId != battleId) {
             clear()
@@ -171,6 +180,13 @@ object BattleStateTracker {
     private var opponentPlayerName: String? = null
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Move Tracking (for hover tooltips)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Maps UUID -> Set of revealed move names (persists entire battle)
+    private val revealedMoves = ConcurrentHashMap<UUID, MutableSet<String>>()
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Baton Pass Support
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -206,6 +222,7 @@ object BattleStateTracker {
     fun clear() {
         lastBattleId = null
         currentTurn = 0
+        isSpectating = false
         weather = null
         terrain = null
         fieldConditions.clear()
@@ -219,6 +236,9 @@ object BattleStateTracker {
         opponentPlayerName = null
         pendingBatonPass.clear()
         batonPassUsers.clear()
+        pokemonItems.clear()
+        knockedOutPokemon.clear()
+        revealedMoves.clear()
         BattleMessageInterceptor.clearMoveTracking()
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared all state")
     }
@@ -668,6 +688,174 @@ object BattleStateTracker {
      * Check if there's pending Baton Pass data for a side.
      */
     fun hasPendingBatonPass(isAlly: Boolean): Boolean = pendingBatonPass.containsKey(isAlly)
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Item Tracking
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Status of a tracked item.
+     */
+    enum class ItemStatus(val displaySuffix: String?) {
+        HELD(null),                    // Item revealed, still held
+        KNOCKED_OFF("knocked off"),    // Item was knocked off by Knock Off
+        STOLEN("stolen"),              // Item was stolen by Thief/Covet
+        CONSUMED("used")               // Item was consumed (berry, Focus Sash, etc.)
+    }
+
+    /**
+     * Tracked item data for a Pokemon.
+     * Items PERSIST after faint/switch for competitive information purposes.
+     */
+    data class TrackedItem(
+        val name: String,
+        var status: ItemStatus,
+        val revealTurn: Int,
+        var removalTurn: Int? = null
+    )
+
+    // Store items by Pokemon UUID - persists after switch/faint, only cleared on battle end
+    private val pokemonItems = ConcurrentHashMap<UUID, TrackedItem>()
+
+    // Track knocked out Pokemon - persists after faint, only cleared on battle end
+    // This ensures pokeball indicators can reliably show KO status even after
+    // the Pokemon is removed from activePokemon
+    private val knockedOutPokemon = ConcurrentHashMap.newKeySet<UUID>()
+
+    /**
+     * Set or update an item for a Pokemon.
+     */
+    fun setItem(pokemonName: String, itemName: String, status: ItemStatus, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for item tracking")
+            return
+        }
+
+        val effectiveTurn = maxOf(1, currentTurn)
+        val existingItem = pokemonItems[uuid]
+
+        when (status) {
+            ItemStatus.HELD -> {
+                // Only add if not already known (first reveal)
+                if (existingItem == null) {
+                    pokemonItems[uuid] = TrackedItem(itemName, status, effectiveTurn)
+                    CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName revealed item $itemName")
+                }
+            }
+            ItemStatus.KNOCKED_OFF, ItemStatus.STOLEN, ItemStatus.CONSUMED -> {
+                // Update existing or create new with removal status
+                pokemonItems[uuid] = TrackedItem(
+                    itemName,
+                    status,
+                    existingItem?.revealTurn ?: effectiveTurn,
+                    removalTurn = effectiveTurn
+                )
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName item $itemName ${status.displaySuffix}")
+            }
+        }
+    }
+
+    /**
+     * Get the tracked item for a Pokemon.
+     */
+    fun getItem(uuid: UUID): TrackedItem? = pokemonItems[uuid]
+
+    /**
+     * Get the tracked item for a Pokemon by name.
+     */
+    fun getItemByName(pokemonName: String, preferAlly: Boolean? = null): TrackedItem? {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return null
+        return pokemonItems[uuid]
+    }
+
+    /**
+     * Transfer an item from one Pokemon to another (for Thief/Covet/Trick).
+     */
+    fun transferItem(fromPokemon: String, toPokemon: String, itemName: String, fromIsAlly: Boolean? = null, toIsAlly: Boolean? = null) {
+        val fromUuid = resolvePokemonUuid(fromPokemon, fromIsAlly)
+        val toUuid = resolvePokemonUuid(toPokemon, toIsAlly)
+        val effectiveTurn = maxOf(1, currentTurn)
+
+        // Mark original holder's item as stolen
+        if (fromUuid != null) {
+            val existingItem = pokemonItems[fromUuid]
+            pokemonItems[fromUuid] = TrackedItem(
+                itemName,
+                ItemStatus.STOLEN,
+                existingItem?.revealTurn ?: effectiveTurn,
+                removalTurn = effectiveTurn
+            )
+        }
+
+        // Give item to the thief
+        if (toUuid != null) {
+            pokemonItems[toUuid] = TrackedItem(itemName, ItemStatus.HELD, effectiveTurn)
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $toPokemon stole $itemName from $fromPokemon")
+    }
+
+    // Note: Items are NOT cleared on switch/faint - they persist for competitive info.
+    // They are only cleared when the battle ends (in clear()).
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Faint/KO Tracking
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Mark a Pokemon as knocked out by name. Used when faint messages are received.
+     */
+    fun markAsKO(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for KO tracking")
+            return
+        }
+        markAsKO(uuid)
+    }
+
+    /**
+     * Mark a Pokemon as knocked out by UUID. Used when HP reaches 0.
+     */
+    fun markAsKO(uuid: UUID) {
+        knockedOutPokemon.add(uuid)
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Marked UUID $uuid as KO'd")
+    }
+
+    /**
+     * Check if a Pokemon is knocked out.
+     */
+    fun isKO(uuid: UUID): Boolean = knockedOutPokemon.contains(uuid)
+
+    /**
+     * Get the UUID for a Pokemon by name. Public method for TeamIndicatorUI to use.
+     */
+    fun getPokemonUuid(pokemonName: String, preferAlly: Boolean? = null): UUID? {
+        return resolvePokemonUuid(pokemonName, preferAlly)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Move Tracking API
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Track a revealed move for a Pokemon.
+     * Called when a Pokemon uses a move in battle.
+     */
+    fun addRevealedMove(pokemonName: String, moveName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for move tracking")
+            return
+        }
+        val moves = revealedMoves.computeIfAbsent(uuid) { ConcurrentHashMap.newKeySet() }
+        if (moves.add(moveName)) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName revealed move '$moveName'")
+        }
+    }
+
+    /**
+     * Get all revealed moves for a Pokemon.
+     */
+    fun getRevealedMoves(uuid: UUID): Set<String> = revealedMoves[uuid]?.toSet() ?: emptySet()
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Spectral Thief Handling

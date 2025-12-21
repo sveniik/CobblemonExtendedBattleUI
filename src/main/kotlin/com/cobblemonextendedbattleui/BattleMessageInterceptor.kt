@@ -63,6 +63,88 @@ object BattleMessageInterceptor {
     private const val SPECTRAL_THIEF = "spectral thief"
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Item Tracking Keys
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Item reveal messages - format: [pokemon, item] or [target, item, revealer]
+    private val ITEM_REVEAL_KEYS = setOf(
+        "cobblemon.battle.item.airballoon",     // Pokemon floats with Air Balloon
+        "cobblemon.battle.item.eat",            // Pokemon eats item
+        "cobblemon.battle.item.harvest",        // Harvest regrows berry
+        "cobblemon.battle.item.recycle",        // Recycle recovers item
+        "cobblemon.battle.item.trick",          // Trick obtains item
+        "cobblemon.battle.damage.item"          // Item damages holder (Life Orb)
+    )
+
+    // Item reveal with different arg order: [target, item, user]
+    private const val FRISK_KEY = "cobblemon.battle.item.frisk"
+
+    // Life Orb damage message - only contains Pokemon name, no item name
+    private const val LIFE_ORB_KEY = "cobblemon.battle.damage.lifeorb"
+
+    // Thief: [thief, item, victim]
+    private const val THIEF_KEY = "cobblemon.battle.item.thief"
+
+    // Bestow: [receiver, item, giver]
+    private const val BESTOW_KEY = "cobblemon.battle.item.bestow"
+
+    // Item consumed/removed messages - format: [pokemon, item]
+    private val ITEM_CONSUMED_KEYS = setOf(
+        "cobblemon.battle.enditem.eat",
+        "cobblemon.battle.enditem.fling",
+        "cobblemon.battle.enditem.gem",
+        "cobblemon.battle.enditem.incinerate",
+        "cobblemon.battle.enditem.airballoon",
+        "cobblemon.battle.enditem.generic",
+        "cobblemon.battle.enditem.mentalherb",
+        "cobblemon.battle.enditem.powerherb",
+        "cobblemon.battle.enditem.mirrorherb",
+        "cobblemon.battle.enditem.whiteherb",
+        "cobblemon.battle.enditem.cellbattery",
+        "cobblemon.battle.enditem.ejectbutton",
+        "cobblemon.battle.enditem.snowball",
+        "cobblemon.battle.enditem.ejectpack",
+        "cobblemon.battle.enditem.berryjuice",
+        "cobblemon.battle.enditem.redcard"
+    )
+
+    // Item consumed messages with only 1 arg (Pokemon name) - item name in key
+    // Format: [pokemon] - item name is derived from key
+    private val ITEM_CONSUMED_SINGLE_ARG_KEYS = mapOf(
+        "cobblemon.battle.enditem.focussash" to "Focus Sash",
+        "cobblemon.battle.enditem.focusband" to "Focus Band"
+    )
+
+    // Berry damage reduction messages - format varies, extract item from message
+    private val BERRY_DAMAGE_KEYS = setOf(
+        "cobblemon.battle.enditem.occaberry",
+        "cobblemon.battle.enditem.passhoberry",
+        "cobblemon.battle.enditem.wacanberry",
+        "cobblemon.battle.enditem.rindoberry",
+        "cobblemon.battle.enditem.yacheberry",
+        "cobblemon.battle.enditem.chopleberry",
+        "cobblemon.battle.enditem.kebiaberry",
+        "cobblemon.battle.enditem.shucaberry",
+        "cobblemon.battle.enditem.cobaberry"
+    )
+
+    // Knock Off: [target, item, attacker]
+    private const val KNOCKOFF_KEY = "cobblemon.battle.enditem.knockoff"
+
+    // Steal and eat (Bug Bite/Pluck): [attacker, item, target]
+    private const val STEALEAT_KEY = "cobblemon.battle.enditem.stealeat"
+
+    // Corrosive Gas: [target, item, attacker]
+    private const val CORROSIVEGAS_KEY = "cobblemon.battle.enditem.corrosivegas"
+
+    // Healing items that reveal but don't consume - format: [pokemon, item]
+    // These items heal the holder each turn but remain held
+    private val HEALING_ITEM_KEYS = setOf(
+        "cobblemon.battle.heal.leftovers",      // Leftovers: "restored a little HP using its Leftovers"
+        "cobblemon.battle.heal.item"            // Black Sludge and similar: "restored HP using its [item]"
+    )
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Weather, Terrain, Field, Side Condition Keys
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -283,6 +365,9 @@ object BattleMessageInterceptor {
                 lastMoveTarget = argToString(args[2])
                 CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Move tracked - $lastMoveUser used $lastMoveName on $lastMoveTarget")
 
+                // Track revealed move for tooltip display
+                BattleStateTracker.addRevealedMove(lastMoveUser!!, lastMoveName!!)
+
                 // Handle Spectral Thief: steal positive stat boosts from target
                 if (lastMoveName?.lowercase() == SPECTRAL_THIEF) {
                     BattleStateTracker.stealPositiveStats(lastMoveUser!!, lastMoveTarget!!)
@@ -297,6 +382,9 @@ object BattleMessageInterceptor {
                 lastMoveName = argToString(args[1])
                 lastMoveTarget = null
                 CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Self-move tracked - $lastMoveUser used $lastMoveName")
+
+                // Track revealed move for tooltip display
+                BattleStateTracker.addRevealedMove(lastMoveUser!!, lastMoveName!!)
 
                 // Handle Baton Pass: mark the user so stats transfer on switch
                 if (lastMoveName?.lowercase() == BATON_PASS) {
@@ -430,6 +518,83 @@ object BattleMessageInterceptor {
                 return
             }
 
+            // ═══════════════════════════════════════════════════════════════════════════
+            // Item Tracking
+            // ═══════════════════════════════════════════════════════════════════════════
+
+            // Standard item reveal: [pokemon, item]
+            if (key in ITEM_REVEAL_KEYS) {
+                extractItemReveal(args)
+                return
+            }
+
+            // Life Orb damage message: [pokemon] - item name not included, we know it's Life Orb
+            if (key == LIFE_ORB_KEY) {
+                extractLifeOrbReveal(args)
+                return
+            }
+
+            // Frisk reveals item: [target, item, frisker]
+            if (key == FRISK_KEY) {
+                extractFriskItem(args)
+                return
+            }
+
+            // Thief steals item: [thief, item, victim]
+            if (key == THIEF_KEY) {
+                extractThiefItem(args)
+                return
+            }
+
+            // Bestow gives item: [receiver, item, giver]
+            if (key == BESTOW_KEY) {
+                extractBestowItem(args)
+                return
+            }
+
+            // Item consumed (general): [pokemon, item]
+            if (key in ITEM_CONSUMED_KEYS) {
+                extractItemConsumed(args)
+                return
+            }
+
+            // Item consumed (single-arg): [pokemon] - item name derived from key
+            ITEM_CONSUMED_SINGLE_ARG_KEYS[key]?.let { itemName ->
+                extractItemConsumedSingleArg(args, itemName)
+                return
+            }
+
+            // Berry damage reduction: [pokemon] - extract berry from key
+            if (key in BERRY_DAMAGE_KEYS) {
+                extractBerryFromKey(key, args)
+                return
+            }
+
+            // Knock Off: [target, item, attacker]
+            if (key == KNOCKOFF_KEY) {
+                extractKnockOff(args)
+                return
+            }
+
+            // Bug Bite / Pluck: [attacker, item, target]
+            if (key == STEALEAT_KEY) {
+                extractStealEat(args)
+                return
+            }
+
+            // Corrosive Gas: [target, item, attacker]
+            if (key == CORROSIVEGAS_KEY) {
+                extractCorrosiveGas(args)
+                return
+            }
+
+            // Healing items (Leftovers, Black Sludge): [pokemon, item]
+            // These items heal each turn but remain held
+            if (key in HEALING_ITEM_KEYS) {
+                extractHealingItem(args)
+                return
+            }
+
             // Perish Song applies to ALL active Pokemon
             if (key == PERISH_SONG_FIELD_KEY) {
                 BattleStateTracker.applyPerishSongToAll()
@@ -438,7 +603,7 @@ object BattleMessageInterceptor {
 
             // Faint/switch clears stats and volatile statuses
             if (key == FAINT_KEY) {
-                clearPokemonState(args)
+                markPokemonFainted(args)
                 return
             }
             if (key == SWITCH_KEY || key == DRAG_KEY) {
@@ -468,6 +633,33 @@ object BattleMessageInterceptor {
         }
     }
 
+    /**
+     * Handle Pokemon faint: mark as KO'd and clear stats/volatiles.
+     * Marking as KO'd is critical for pokeball indicators since the Pokemon
+     * gets removed from activePokemon immediately after fainting.
+     */
+    private fun markPokemonFainted(args: Array<out Any>) {
+        if (args.isEmpty()) return
+
+        val pokemonName = when (val arg0 = args[0]) {
+            is Text -> arg0.string
+            is String -> arg0
+            else -> arg0.toString()
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Pokemon fainted - $pokemonName")
+
+        // Mark as KO'd in BattleStateTracker (persists for pokeball indicators)
+        BattleStateTracker.markAsKO(pokemonName)
+
+        // Also notify TeamIndicatorUI directly to update its tracking
+        TeamIndicatorUI.markPokemonAsKO(pokemonName)
+
+        // Clear stats and volatiles
+        BattleStateTracker.clearPokemonStatsByName(pokemonName)
+        BattleStateTracker.clearPokemonVolatilesByName(pokemonName)
+    }
+
     private fun clearPokemonState(args: Array<out Any>) {
         if (args.isEmpty()) return
 
@@ -477,7 +669,7 @@ object BattleMessageInterceptor {
             else -> arg0.toString()
         }
 
-        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Clearing stats and volatiles for $pokemonName (faint/switch)")
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Clearing stats and volatiles for $pokemonName (switch)")
         BattleStateTracker.clearPokemonStatsByName(pokemonName)
         BattleStateTracker.clearPokemonVolatilesByName(pokemonName)
     }
@@ -650,5 +842,179 @@ object BattleMessageInterceptor {
 
         CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Volatile end - $pokemonName lost ${volatileStatus.displayName}")
         BattleStateTracker.clearVolatileStatus(pokemonName, volatileStatus)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Item Extraction Functions
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Standard item reveal: args = [pokemon, item]
+     * Used for: Air Balloon, item.eat, Harvest, Recycle, Trick obtain, damage.item (Life Orb)
+     */
+    private fun extractItemReveal(args: Array<out Any>) {
+        if (args.size < 2) return
+
+        val pokemonName = argToString(args[0])
+        val itemName = argToString(args[1])
+
+        BattleStateTracker.setItem(pokemonName, itemName, BattleStateTracker.ItemStatus.HELD)
+    }
+
+    /**
+     * Life Orb damage message: args = [pokemon]
+     * The message "%1$s lost some of its HP!" only contains the Pokemon name,
+     * but we know the item is Life Orb since this message is only for that item.
+     */
+    private fun extractLifeOrbReveal(args: Array<out Any>) {
+        if (args.isEmpty()) return
+
+        val pokemonName = argToString(args[0])
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Life Orb revealed for $pokemonName")
+        BattleStateTracker.setItem(pokemonName, "Life Orb", BattleStateTracker.ItemStatus.HELD)
+    }
+
+    /**
+     * Frisk reveals item: args = [target, item, frisker]
+     * Frisk ability reveals opponent's item
+     */
+    private fun extractFriskItem(args: Array<out Any>) {
+        if (args.size < 2) return
+
+        val targetPokemon = argToString(args[0])
+        val itemName = argToString(args[1])
+
+        BattleStateTracker.setItem(targetPokemon, itemName, BattleStateTracker.ItemStatus.HELD)
+    }
+
+    /**
+     * Thief steals item: args = [thief, item, victim]
+     */
+    private fun extractThiefItem(args: Array<out Any>) {
+        if (args.size < 3) return
+
+        val thiefPokemon = argToString(args[0])
+        val itemName = argToString(args[1])
+        val victimPokemon = argToString(args[2])
+
+        // Transfer item from victim to thief
+        BattleStateTracker.transferItem(victimPokemon, thiefPokemon, itemName)
+    }
+
+    /**
+     * Bestow gives item: args = [receiver, item, giver]
+     */
+    private fun extractBestowItem(args: Array<out Any>) {
+        if (args.size < 3) return
+
+        val receiverPokemon = argToString(args[0])
+        val itemName = argToString(args[1])
+        val giverPokemon = argToString(args[2])
+
+        // Transfer item from giver to receiver
+        BattleStateTracker.transferItem(giverPokemon, receiverPokemon, itemName)
+    }
+
+    /**
+     * Item consumed: args = [pokemon, item]
+     * Used for berries eaten, gems used, etc.
+     */
+    private fun extractItemConsumed(args: Array<out Any>) {
+        if (args.size < 2) return
+
+        val pokemonName = argToString(args[0])
+        val itemName = argToString(args[1])
+
+        BattleStateTracker.setItem(pokemonName, itemName, BattleStateTracker.ItemStatus.CONSUMED)
+    }
+
+    /**
+     * Item consumed with single arg: args = [pokemon]
+     * Used for Focus Sash, Focus Band where item name is in the translation key.
+     */
+    private fun extractItemConsumedSingleArg(args: Array<out Any>, itemName: String) {
+        if (args.isEmpty()) return
+
+        val pokemonName = argToString(args[0])
+        BattleStateTracker.setItem(pokemonName, itemName, BattleStateTracker.ItemStatus.CONSUMED)
+    }
+
+    /**
+     * Berry damage reduction: key contains berry name, args = [pokemon]
+     * Extract berry name from key like "cobblemon.battle.enditem.occaberry"
+     */
+    private fun extractBerryFromKey(key: String, args: Array<out Any>) {
+        if (args.isEmpty()) return
+
+        val pokemonName = argToString(args[0])
+
+        // Extract berry name from key: "cobblemon.battle.enditem.occaberry" -> "Occa Berry"
+        val berryId = key.substringAfterLast(".")
+        val berryName = berryId
+            .replace("berry", " Berry")
+            .replaceFirstChar { it.uppercase() }
+
+        BattleStateTracker.setItem(pokemonName, berryName, BattleStateTracker.ItemStatus.CONSUMED)
+    }
+
+    /**
+     * Knock Off: args = [target, item, attacker]
+     */
+    private fun extractKnockOff(args: Array<out Any>) {
+        if (args.size < 2) return
+
+        val targetPokemon = argToString(args[0])
+        val itemName = argToString(args[1])
+
+        BattleStateTracker.setItem(targetPokemon, itemName, BattleStateTracker.ItemStatus.KNOCKED_OFF)
+    }
+
+    /**
+     * Bug Bite / Pluck steal and eat: args = [attacker, item, target]
+     */
+    private fun extractStealEat(args: Array<out Any>) {
+        if (args.size < 3) return
+
+        // args = [attacker, item, target] - attacker eats the item immediately
+        val itemName = argToString(args[1])
+        val targetPokemon = argToString(args[2])
+
+        // Mark target's item as stolen, attacker doesn't keep it (they eat it)
+        BattleStateTracker.setItem(targetPokemon, itemName, BattleStateTracker.ItemStatus.STOLEN)
+    }
+
+    /**
+     * Corrosive Gas: args = [target, item, attacker]
+     * Destroys the target's held item
+     */
+    private fun extractCorrosiveGas(args: Array<out Any>) {
+        if (args.size < 2) return
+
+        val targetPokemon = argToString(args[0])
+        val itemName = argToString(args[1])
+
+        // Corrosive Gas destroys the item (similar to Knock Off but different message)
+        BattleStateTracker.setItem(targetPokemon, itemName, BattleStateTracker.ItemStatus.CONSUMED)
+    }
+
+    /**
+     * Healing items: args = [pokemon, item]
+     * Leftovers and Black Sludge heal each turn and remain held.
+     * Berries (Sitrus Berry, etc.) heal once and are consumed.
+     */
+    private fun extractHealingItem(args: Array<out Any>) {
+        if (args.size < 2) return
+
+        val pokemonName = argToString(args[0])
+        val itemName = argToString(args[1])
+
+        // Berries are consumed when they heal, other healing items (Leftovers, Black Sludge) remain held
+        val status = if (itemName.lowercase().contains("berry")) {
+            BattleStateTracker.ItemStatus.CONSUMED
+        } else {
+            BattleStateTracker.ItemStatus.HELD
+        }
+
+        BattleStateTracker.setItem(pokemonName, itemName, status)
     }
 }

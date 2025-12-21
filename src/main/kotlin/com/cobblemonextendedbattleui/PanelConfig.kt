@@ -73,6 +73,14 @@ object PanelConfig {
     var logExpanded: Boolean = true
         private set
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Team indicator tooltip settings
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Tooltip font scale (separate from other panels)
+    var tooltipFontScale: Float = 1.0f
+        private set
+
     // Default log dimensions
     const val DEFAULT_LOG_WIDTH = 200
     const val DEFAULT_LOG_HEIGHT = 120
@@ -111,7 +119,9 @@ object PanelConfig {
         val logWidth: Int? = null,
         val logHeight: Int? = null,
         val logFontScale: Float = 1.0f,
-        val logExpanded: Boolean = true
+        val logExpanded: Boolean = true,
+        // Tooltip settings
+        val tooltipFontScale: Float = 1.0f
     )
 
     fun load() {
@@ -132,6 +142,7 @@ object PanelConfig {
                 logHeight = data.logHeight
                 logFontScale = data.logFontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
                 logExpanded = data.logExpanded
+                tooltipFontScale = data.tooltipFontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
                 CobblemonExtendedBattleUI.LOGGER.info("PanelConfig: Loaded config - panel pos=(${panelX}, ${panelY}), log pos=(${logX}, ${logY})")
             }
         } catch (e: Exception) {
@@ -154,7 +165,8 @@ object PanelConfig {
                 logWidth = logWidth,
                 logHeight = logHeight,
                 logFontScale = logFontScale,
-                logExpanded = logExpanded
+                logExpanded = logExpanded,
+                tooltipFontScale = tooltipFontScale
             )
             configFile.parentFile?.mkdirs()
             configFile.writeText(gson.toJson(data))
@@ -210,6 +222,10 @@ object PanelConfig {
 
     fun adjustLogFontScale(delta: Float) {
         logFontScale = (logFontScale + delta).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+    }
+
+    fun adjustTooltipFontScale(delta: Float) {
+        tooltipFontScale = (tooltipFontScale + delta).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
     }
 
     fun setLogExpanded(expanded: Boolean) {

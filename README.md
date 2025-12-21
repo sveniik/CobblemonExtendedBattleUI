@@ -41,15 +41,18 @@ The battle log uses Cobblemon's native textures and is fully resizable, moveable
 
 ![Battle Log](https://cdn.modrinth.com/data/cached_images/ae64946a56c0acbefa825fda45b51fe8f9e0cf02.png)
 
-### Team Pokeballs
+### Team Indicators
 
-Small pokeball indicators below each team's health bars showing:
+Pokemon model indicators below each team's health bars showing:
 
-- How many Pokemon each side has (opponent's team is revealed as they send them out)
-- Which Pokemon have status conditions (colored pokeballs)
-- Which Pokemon have fainted (gray pokeballs)
+- **Visual Models** - Each Pokemon displayed as a mini 3D model
+- **Hover Tooltips** - Hover over any Pokemon to see detailed information
+- **Your Pokemon** - Shows all moves and held items
+- **Opponent Pokemon** - Shows only revealed moves, items, stat changes, and effects
+- **Status Tracking** - Status conditions shown via color tinting on models
+- **KO Tracking** - Fainted Pokemon appear grayed out
 
-![Pokeball Showcase](https://cdn.modrinth.com/data/cached_images/5209e6c6d2840da41a911607ddf425533e2783eb.png)
+![Team Indicators](https://cdn.modrinth.com/data/cached_images/5209e6c6d2840da41a911607ddf425533e2783eb.png)
 
 ### What this mod does NOT do
 
@@ -59,7 +62,7 @@ This mod does not give you any information that you could not otherwise have obt
 
 ### Battle Info Panel & Battle Log
 - **Drag the header** - Move the panel anywhere on screen
-- **Ctrl + Scroll or [ and ]** - Adjust font size
+- **Ctrl + Scroll or [ and ]** - Adjust font size (while hovering over the panel)
 - **Drag sides or corners** - Resize panel
 
 ### Battle Info
@@ -68,9 +71,13 @@ This mod does not give you any information that you could not otherwise have obt
 ### Battle Log
 - **Click bottom-right arrow** - Expand/collapse the log
 
+### Team Indicators
+- **Hover** - Show detailed tooltip with moves, items, stats, and effects
+- **Ctrl + Scroll or [ and ]** - Adjust tooltip font size (while hovering)
+
 You can rebind keys in the Minecraft keybind settings menu.
 
-Your preferences for panel/log size, position, and state are saved automatically.
+Your preferences for panel/log size, position, and font sizes are saved automatically.
 
 ## Requirements
 
@@ -85,6 +92,8 @@ Your preferences for panel/log size, position, and state are saved automatically
 - This is a **client-side only** mod - it works in singleplayer and on servers without the server needing it
 - The opponent's full team isn't shown until they send out each Pokemon. This is intended.
 - Weather/terrain/screen durations show ranges because we can't know if the opponent has duration-extending items
+- When spectating, some information - moves, items, stat changes - are only shown when revealed after you started 
+watching
 
 ## License
 

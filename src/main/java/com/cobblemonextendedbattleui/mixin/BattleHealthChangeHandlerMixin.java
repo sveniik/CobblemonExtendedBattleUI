@@ -11,6 +11,8 @@ import com.cobblemon.mod.common.client.battle.ClientBattlePokemon;
 import com.cobblemon.mod.common.client.net.battle.BattleHealthChangeHandler;
 import com.cobblemon.mod.common.net.messages.client.battle.BattleHealthChangePacket;
 import com.cobblemonextendedbattleui.DamageTracker;
+import com.cobblemonextendedbattleui.TeamIndicatorUI;
+import com.cobblemonextendedbattleui.BattleStateTracker;
 import net.minecraft.client.MinecraftClient;
 
 import java.util.UUID;
@@ -73,6 +75,13 @@ public class BattleHealthChangeHandlerMixin {
                 // Update our tracking with the new percentage BEFORE calculating damage
                 // This ensures subsequent packets in a multi-hit move use the correct base
                 DamageTracker.INSTANCE.updateHpPercent(uuid, newPercent);
+
+                // Detect KO at the exact moment HP reaches 0
+                // This is more reliable than waiting for the faint message
+                if (newPercent <= 0) {
+                    TeamIndicatorUI.INSTANCE.markPokemonAsKO(uuid);
+                    BattleStateTracker.INSTANCE.markAsKO(uuid);
+                }
 
                 float hpChange = oldPercent - newPercent;
                 String pokemonName = pokemon.getDisplayName().getString();

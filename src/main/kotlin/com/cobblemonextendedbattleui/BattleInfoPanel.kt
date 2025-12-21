@@ -203,9 +203,13 @@ object BattleInfoPanel {
         if (isToggleDown && !wasToggleKeyPressed) toggle()
         wasToggleKeyPressed = isToggleDown
 
+        // Font keybinds - only handle if no other panel has priority
+        // Priority: TeamIndicatorUI (tooltip/team panels) > BattleLogWidget > BattleInfoPanel (default)
+        val otherPanelHasPriority = TeamIndicatorUI.shouldHandleFontInput() || BattleLogWidget.isMouseOverWidget()
+
         val increaseKey = InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.increaseFontKey.boundKeyTranslationKey)
         val isIncreaseDown = UIUtils.isKeyOrButtonPressed(handle, increaseKey)
-        if (isIncreaseDown && !wasIncreaseFontKeyPressed) {
+        if (isIncreaseDown && !wasIncreaseFontKeyPressed && !otherPanelHasPriority) {
             PanelConfig.adjustFontScale(PanelConfig.FONT_SCALE_STEP)
             PanelConfig.save()
         }
@@ -213,7 +217,7 @@ object BattleInfoPanel {
 
         val decreaseKey = InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.decreaseFontKey.boundKeyTranslationKey)
         val isDecreaseDown = UIUtils.isKeyOrButtonPressed(handle, decreaseKey)
-        if (isDecreaseDown && !wasDecreaseFontKeyPressed) {
+        if (isDecreaseDown && !wasDecreaseFontKeyPressed && !otherPanelHasPriority) {
             PanelConfig.adjustFontScale(-PanelConfig.FONT_SCALE_STEP)
             PanelConfig.save()
         }
@@ -518,7 +522,6 @@ object BattleInfoPanel {
         }
 
         // Build Pokemon data with stat changes and volatile statuses, separated by side
-        // Stat changes are tracked via message parsing in BattleStateTracker
         val allyPokemonData = allyPokemon.map { pokemon ->
             val statChanges = BattleStateTracker.getStatChanges(pokemon.uuid)
             val volatiles = BattleStateTracker.getVolatileStatuses(pokemon.uuid)

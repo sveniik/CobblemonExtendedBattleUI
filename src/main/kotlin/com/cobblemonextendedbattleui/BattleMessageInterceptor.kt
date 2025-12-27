@@ -62,6 +62,10 @@ object BattleMessageInterceptor {
     private const val BATON_PASS = "baton pass"
     private const val SPECTRAL_THIEF = "spectral thief"
 
+    // Ability announcement keys (for abilities that affect PP/mechanics)
+    // Pressure: "X is exerting its Pressure!" - args: [pokemonName]
+    private const val PRESSURE_KEY = "cobblemon.battle.ability.pressure"
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Item Tracking Keys
     // ═══════════════════════════════════════════════════════════════════════════
@@ -366,8 +370,8 @@ object BattleMessageInterceptor {
                 lastMoveTarget = argToString(args[2])
                 CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Move tracked - $lastMoveUser used $lastMoveName on $lastMoveTarget")
 
-                // Track revealed move for tooltip display
-                BattleStateTracker.addRevealedMove(lastMoveUser!!, lastMoveName!!)
+                // Track revealed move for tooltip display (pass target for Pressure PP check)
+                BattleStateTracker.addRevealedMove(lastMoveUser!!, lastMoveName!!, lastMoveTarget)
 
                 // Handle Spectral Thief: steal positive stat boosts from target
                 if (lastMoveName?.lowercase() == SPECTRAL_THIEF) {
@@ -384,13 +388,22 @@ object BattleMessageInterceptor {
                 lastMoveTarget = null
                 CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Self-move tracked - $lastMoveUser used $lastMoveName")
 
-                // Track revealed move for tooltip display
-                BattleStateTracker.addRevealedMove(lastMoveUser!!, lastMoveName!!)
+                // Track revealed move for tooltip display (no target = no Pressure check)
+                BattleStateTracker.addRevealedMove(lastMoveUser!!, lastMoveName!!, null)
 
                 // Handle Baton Pass: mark the user so stats transfer on switch
                 if (lastMoveName?.lowercase() == BATON_PASS) {
                     BattleStateTracker.markBatonPassUsed(lastMoveUser!!)
                 }
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Pressure ability announcement - register Pokemon with Pressure
+            // This causes moves used against them to cost 2 PP instead of 1
+            if (key == PRESSURE_KEY && args.isNotEmpty()) {
+                val pokemonName = argToString(args[0])
+                BattleStateTracker.registerPressure(pokemonName)
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Pressure registered for $pokemonName")
                 // Don't return - let it continue to be processed by BattleLog
             }
 

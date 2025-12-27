@@ -2,6 +2,7 @@ package com.cobblemonextendedbattleui
 
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Tracks weather, terrain, field conditions, side conditions, stat changes, and volatile statuses.
@@ -186,6 +187,98 @@ object BattleStateTracker {
     // Maps UUID -> Set of revealed move names (persists entire battle)
     private val revealedMoves = ConcurrentHashMap<UUID, MutableSet<String>>()
 
+    // Maps UUID -> (move name -> usage count) for estimating opponent PP
+    private val moveUsageCounts = ConcurrentHashMap<UUID, ConcurrentHashMap<String, Int>>()
+
+    // UUIDs of Pokemon with Pressure ability (causes 2 PP to be consumed instead of 1)
+    private val pressurePokemon = ConcurrentHashMap.newKeySet<UUID>()
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // PP Tracking (for player's Pokemon)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Tracked move with PP information.
+     * Uses AtomicInteger for thread-safe PP tracking.
+     */
+    class TrackedMove(val name: String, initialPp: Int, val maxPp: Int) {
+        private val _currentPp = AtomicInteger(initialPp)
+        val currentPp: Int get() = _currentPp.get()
+
+        /**
+         * Atomically decrement PP by the specified amount (minimum 0).
+         * @param amount Amount to decrement (default 1, use 2 for Pressure)
+         * Returns the new PP value.
+         */
+        fun decrementPp(amount: Int = 1): Int {
+            return _currentPp.updateAndGet { current -> (current - amount).coerceAtLeast(0) }
+        }
+    }
+
+    // Maps UUID -> List of tracked moves with PP
+    private val trackedMoves = ConcurrentHashMap<UUID, List<TrackedMove>>()
+
+    /**
+     * Initialize PP tracking for a Pokemon's moves.
+     * Only initializes if not already tracked (prevents overwriting during battle).
+     * Uses putIfAbsent for thread-safe atomic initialization.
+     */
+    fun initializeMoves(uuid: UUID, moves: List<TrackedMove>) {
+        if (moves.isNotEmpty() && trackedMoves.putIfAbsent(uuid, moves) == null) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Initialized PP tracking for $uuid with ${moves.size} moves")
+        }
+    }
+
+    /**
+     * Decrement PP for a move when used.
+     * Called from addRevealedMove when a player's Pokemon uses a move.
+     * @param targetName Optional target name - if target has Pressure, decrements by 2
+     */
+    fun decrementPP(uuid: UUID, moveName: String, targetName: String? = null) {
+        val moves = trackedMoves[uuid] ?: return
+        val move = moves.find { it.name.equals(moveName, ignoreCase = true) } ?: return
+
+        // Check if target has Pressure ability (costs 2 PP instead of 1)
+        val ppCost = if (targetName != null) {
+            val targetUuid = resolvePokemonUuid(targetName, preferAlly = false)
+            if (targetUuid != null && pressurePokemon.contains(targetUuid)) 2 else 1
+        } else {
+            1
+        }
+
+        val newPp = move.decrementPp(ppCost)
+        if (ppCost > 1) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $moveName PP: $newPp/${move.maxPp} (Pressure: -$ppCost)")
+        } else {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $moveName PP: $newPp/${move.maxPp}")
+        }
+    }
+
+    /**
+     * Register a Pokemon as having the Pressure ability.
+     * Called when Pressure is announced at battle start or on switch-in.
+     */
+    fun registerPressure(pokemonName: String) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly = null) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Could not resolve UUID for Pressure Pokemon '$pokemonName'")
+            return
+        }
+        if (pressurePokemon.add(uuid)) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Registered Pressure for $pokemonName ($uuid)")
+        }
+    }
+
+    /**
+     * Check if a Pokemon has Pressure ability.
+     */
+    fun hasPressure(uuid: UUID): Boolean = pressurePokemon.contains(uuid)
+
+    /**
+     * Get tracked moves with PP for a Pokemon.
+     * Returns null if not tracked (opponent Pokemon).
+     */
+    fun getTrackedMoves(uuid: UUID): List<TrackedMove>? = trackedMoves[uuid]
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Baton Pass Support
     // ═══════════════════════════════════════════════════════════════════════════
@@ -240,6 +333,9 @@ object BattleStateTracker {
         knockedOutPokemon.clear()
         transformedPokemon.clear()
         revealedMoves.clear()
+        moveUsageCounts.clear()
+        trackedMoves.clear()
+        pressurePokemon.clear()
         BattleMessageInterceptor.clearMoveTracking()
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared all state")
     }
@@ -901,8 +997,10 @@ object BattleStateTracker {
     /**
      * Track a revealed move for a Pokemon.
      * Called when a Pokemon uses a move in battle.
+     * Also decrements PP for player's Pokemon if PP tracking is initialized.
+     * Tracks usage count for estimating opponent PP.
      */
-    fun addRevealedMove(pokemonName: String, moveName: String, preferAlly: Boolean? = null) {
+    fun addRevealedMove(pokemonName: String, moveName: String, targetName: String? = null, preferAlly: Boolean? = null) {
         val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
             CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for move tracking")
             return
@@ -911,12 +1009,28 @@ object BattleStateTracker {
         if (moves.add(moveName)) {
             CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName revealed move '$moveName'")
         }
+
+        // Track usage count for estimating opponent PP
+        val usageCounts = moveUsageCounts.computeIfAbsent(uuid) { ConcurrentHashMap() }
+        usageCounts.compute(moveName) { _, count -> (count ?: 0) + 1 }
+
+        // Decrement PP for player's Pokemon (if PP tracking is initialized)
+        // Pass target name for Pressure check (costs 2 PP if target has Pressure)
+        decrementPP(uuid, moveName, targetName)
     }
 
     /**
      * Get all revealed moves for a Pokemon.
      */
     fun getRevealedMoves(uuid: UUID): Set<String> = revealedMoves[uuid]?.toSet() ?: emptySet()
+
+    /**
+     * Get the usage count for a specific move.
+     */
+    fun getMoveUsageCount(uuid: UUID, moveName: String): Int {
+        return moveUsageCounts[uuid]?.get(moveName) ?: 0
+    }
+
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Spectral Thief Handling

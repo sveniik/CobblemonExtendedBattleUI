@@ -1,5 +1,8 @@
 package com.cobblemonextendedbattleui
 
+import com.cobblemon.mod.common.api.moves.Moves
+import com.cobblemon.mod.common.api.pokemon.PokemonSpecies
+import com.cobblemon.mod.common.api.pokemon.stats.Stats
 import com.cobblemon.mod.common.api.pokemon.status.Statuses
 import com.cobblemon.mod.common.api.pokemon.status.Status
 import com.cobblemon.mod.common.client.CobblemonClient
@@ -140,6 +143,18 @@ object TeamIndicatorUI {
     )
 
     /**
+     * Move information including PP (for player's Pokemon) or estimated (for opponent).
+     */
+    data class MoveInfo(
+        val name: String,
+        val currentPp: Int? = null,        // Exact PP for player's Pokemon
+        val maxPp: Int? = null,            // Max PP for player's Pokemon
+        val estimatedRemaining: Int? = null, // Estimated remaining PP (assumes PP Max)
+        val estimatedMax: Int? = null,     // Estimated max PP (base * 8/5)
+        val usageCount: Int? = null        // Times used (for unknown moves)
+    )
+
+    /**
      * Aggregated data for tooltip display.
      */
     data class TooltipData(
@@ -147,10 +162,15 @@ object TeamIndicatorUI {
         val hpPercent: Float,
         val statusCondition: Status?,
         val isKO: Boolean,
-        val revealedMoves: Set<String>,
+        val moves: List<MoveInfo>,
         val item: BattleStateTracker.TrackedItem?,
         val statChanges: Map<BattleStateTracker.BattleStat, Int>,
-        val volatileStatuses: Set<BattleStateTracker.VolatileStatusState>
+        val volatileStatuses: Set<BattleStateTracker.VolatileStatusState>,
+        val level: Int?,
+        val speciesName: String?,
+        val isPlayerPokemon: Boolean,
+        val actualSpeed: Int? = null,
+        val abilityName: String? = null  // For speed modifier calculation
     )
 
     // Currently rendered pokeball bounds (refreshed each frame)
@@ -186,6 +206,247 @@ object TeamIndicatorUI {
     private const val TOOLTIP_CORNER = 3
     private const val TOOLTIP_BASE_LINE_HEIGHT = 10  // Base line height before scaling
     private const val TOOLTIP_FONT_SCALE = 0.85f     // Base font scale multiplier
+    private val TOOLTIP_SPEED = color(150, 180, 220, 255)  // Light blue for speed info
+
+    // ================== Stat Calculation Utilities ==================
+
+    /**
+     * Get the stat stage multiplier for a given stage (-6 to +6).
+     * Uses the standard Pokemon formula: (2 + stage) / 2 for positive, 2 / (2 - stage) for negative.
+     */
+    private fun getStageMultiplier(stage: Int): Double {
+        return if (stage >= 0) {
+            (2.0 + stage) / 2.0
+        } else {
+            2.0 / (2.0 - stage)
+        }
+    }
+
+    /**
+     * Calculate a stat value using the standard Pokemon formula.
+     * stat = floor((floor((2 * base + iv + floor(ev/4)) * level / 100) + 5) * nature)
+     */
+    private fun calculateStat(base: Int, level: Int, iv: Int, ev: Int, natureMod: Double): Int {
+        val inner = ((2 * base + iv + ev / 4) * level / 100) + 5
+        return (inner * natureMod).toInt()
+    }
+
+    // ================== Speed Modifier Utilities ==================
+
+    /**
+     * Normalize ability name for comparison (lowercase, no spaces/underscores).
+     */
+    private fun normalizeAbilityName(name: String?): String? =
+        name?.lowercase()?.replace(" ", "")?.replace("_", "")
+
+    /**
+     * Weather-based speed-doubling abilities.
+     */
+    private val WEATHER_SPEED_ABILITIES = mapOf(
+        "chlorophyll" to BattleStateTracker.Weather.SUN,
+        "swiftswim" to BattleStateTracker.Weather.RAIN,
+        "sandrush" to BattleStateTracker.Weather.SANDSTORM,
+        "slushrush" to BattleStateTracker.Weather.SNOW
+    )
+
+    /**
+     * Terrain-based speed abilities.
+     */
+    private val TERRAIN_SPEED_ABILITIES = mapOf(
+        "surgesurfer" to BattleStateTracker.Terrain.ELECTRIC
+    )
+
+    /**
+     * Get speed multiplier from ability given current battle conditions.
+     * Returns 1.0 if ability doesn't affect speed or conditions aren't met.
+     */
+    private fun getAbilitySpeedMultiplier(
+        abilityName: String?,
+        weather: BattleStateTracker.Weather?,
+        terrain: BattleStateTracker.Terrain?,
+        hasStatus: Boolean,
+        itemConsumed: Boolean
+    ): Double {
+        val normalizedAbility = normalizeAbilityName(abilityName) ?: return 1.0
+
+        // Weather-based abilities (2x)
+        WEATHER_SPEED_ABILITIES[normalizedAbility]?.let { requiredWeather ->
+            // Handle Slush Rush which works in both Snow and Hail
+            if (normalizedAbility == "slushrush") {
+                if (weather == BattleStateTracker.Weather.SNOW || weather == BattleStateTracker.Weather.HAIL) {
+                    return 2.0
+                }
+            } else if (weather == requiredWeather) {
+                return 2.0
+            }
+        }
+
+        // Terrain-based abilities (2x)
+        TERRAIN_SPEED_ABILITIES[normalizedAbility]?.let { requiredTerrain ->
+            if (terrain == requiredTerrain) return 2.0
+        }
+
+        // Quick Feet (1.5x when statused, also ignores paralysis speed drop)
+        if (normalizedAbility == "quickfeet" && hasStatus) return 1.5
+
+        // Unburden (2x after item consumed)
+        if (normalizedAbility == "unburden" && itemConsumed) return 2.0
+
+        return 1.0
+    }
+
+    /**
+     * Get speed multiplier from status condition.
+     * Quick Feet negates paralysis speed penalty.
+     */
+    private fun getStatusSpeedMultiplier(status: Status?, abilityName: String?): Double {
+        if (status == Statuses.PARALYSIS) {
+            // Quick Feet ignores paralysis speed penalty
+            if (normalizeAbilityName(abilityName) == "quickfeet") return 1.0
+            return 0.5
+        }
+        return 1.0
+    }
+
+    /**
+     * Get speed multiplier from held item.
+     */
+    private fun getItemSpeedMultiplier(itemName: String?): Double {
+        if (itemName == null) return 1.0
+        val normalizedItem = itemName.lowercase().replace(" ", "").replace("_", "")
+        return when (normalizedItem) {
+            "choicescarf" -> 1.5
+            "ironball" -> 0.5
+            else -> 1.0
+        }
+    }
+
+    /**
+     * Check if species can have any speed-boosting ability that's currently active.
+     * Returns the max multiplier if any ability could apply, 1.0 otherwise.
+     */
+    private fun getMaxPossibleAbilitySpeedMultiplier(
+        speciesName: String,
+        weather: BattleStateTracker.Weather?,
+        terrain: BattleStateTracker.Terrain?,
+        hasStatus: Boolean,
+        itemConsumed: Boolean
+    ): Double {
+        val species = PokemonSpecies.getByName(speciesName) ?: return 1.0
+        var maxMultiplier = 1.0
+
+        // Get all possible abilities for this species
+        val possibleAbilities = species.abilities.mapNotNull { normalizeAbilityName(it.template.name) }
+
+        for (ability in possibleAbilities) {
+            val mult = getAbilitySpeedMultiplier(ability, weather, terrain, hasStatus, itemConsumed)
+            if (mult > maxMultiplier) maxMultiplier = mult
+        }
+
+        return maxMultiplier
+    }
+
+    /**
+     * Calculate effective speed for player's Pokemon with all modifiers.
+     */
+    private fun calculateEffectiveSpeed(
+        baseSpeed: Int,
+        speedStage: Int,
+        abilityName: String?,
+        status: Status?,
+        itemName: String?,
+        itemConsumed: Boolean
+    ): Int {
+        val weather = BattleStateTracker.weather?.type
+        val terrain = BattleStateTracker.terrain?.type
+        val hasStatus = status != null
+
+        val stageMultiplier = getStageMultiplier(speedStage)
+        val abilityMultiplier = getAbilitySpeedMultiplier(abilityName, weather, terrain, hasStatus, itemConsumed)
+        val statusMultiplier = getStatusSpeedMultiplier(status, abilityName)
+        val itemMultiplier = if (!itemConsumed) getItemSpeedMultiplier(itemName) else 1.0
+
+        return (baseSpeed * stageMultiplier * abilityMultiplier * statusMultiplier * itemMultiplier).toInt()
+    }
+
+    /**
+     * Result of opponent speed range calculation.
+     */
+    data class SpeedRangeResult(
+        val minSpeed: Int,
+        val maxSpeed: Int,
+        val abilityNote: String? = null  // Note if ability could boost speed
+    )
+
+    /**
+     * Calculate speed range for opponent with all modifiers considered.
+     * Accounts for possible abilities that could boost speed in current conditions.
+     */
+    private fun calculateOpponentSpeedRange(
+        speciesName: String,
+        level: Int,
+        speedStage: Int,
+        status: Status?,
+        knownItem: BattleStateTracker.TrackedItem?
+    ): SpeedRangeResult? {
+        val species = PokemonSpecies.getByName(speciesName) ?: return null
+        val baseSpeed = species.baseStats[Stats.SPEED] ?: return null
+        val weather = BattleStateTracker.weather?.type
+        val terrain = BattleStateTracker.terrain?.type
+        val hasStatus = status != null
+        val itemConsumed = knownItem?.status == BattleStateTracker.ItemStatus.CONSUMED
+
+        // Calculate base stat range (0 IV/0 EV/- nature to 31 IV/252 EV/+ nature)
+        val minBaseStat = calculateStat(baseSpeed, level, 0, 0, 0.9)
+        val maxBaseStat = calculateStat(baseSpeed, level, 31, 252, 1.1)
+
+        val stageMultiplier = getStageMultiplier(speedStage)
+        val statusMultiplier = getStatusSpeedMultiplier(status, null)  // Conservative: assume no Quick Feet for min
+
+        // For min speed: assume worst case (no ability boost, paralysis penalty if paralyzed)
+        val minSpeed = (minBaseStat * stageMultiplier * statusMultiplier).toInt()
+
+        // For max speed: check if any ability could boost speed
+        val maxAbilityMultiplier = getMaxPossibleAbilitySpeedMultiplier(speciesName, weather, terrain, hasStatus, itemConsumed)
+
+        // For paralysis: Quick Feet could negate the penalty AND give 1.5x
+        val maxStatusMultiplier = if (status == Statuses.PARALYSIS) {
+            // Check if Quick Feet is possible
+            val possibleAbilities = species.abilities.mapNotNull { normalizeAbilityName(it.template.name) }
+            if ("quickfeet" in possibleAbilities) 1.0 else statusMultiplier
+        } else {
+            1.0
+        }
+
+        val maxSpeed = (maxBaseStat * stageMultiplier * maxAbilityMultiplier.coerceAtLeast(1.0) * maxStatusMultiplier).toInt()
+
+        // Generate ability note if conditions apply
+        val abilityNote = when {
+            maxAbilityMultiplier > 1.0 -> {
+                val activeConditions = mutableListOf<String>()
+                val normalizedAbilities = species.abilities.mapNotNull { normalizeAbilityName(it.template.name) }
+                if (weather == BattleStateTracker.Weather.SUN && "chlorophyll" in normalizedAbilities) {
+                    activeConditions.add("Chlorophyll")
+                }
+                if (weather == BattleStateTracker.Weather.RAIN && "swiftswim" in normalizedAbilities) {
+                    activeConditions.add("Swift Swim")
+                }
+                if (weather == BattleStateTracker.Weather.SANDSTORM && "sandrush" in normalizedAbilities) {
+                    activeConditions.add("Sand Rush")
+                }
+                if ((weather == BattleStateTracker.Weather.SNOW || weather == BattleStateTracker.Weather.HAIL) && "slushrush" in normalizedAbilities) {
+                    activeConditions.add("Slush Rush")
+                }
+                if (terrain == BattleStateTracker.Terrain.ELECTRIC && "surgesurfer" in normalizedAbilities) {
+                    activeConditions.add("Surge Surfer")
+                }
+                if (activeConditions.isNotEmpty()) activeConditions.joinToString("/") + "?" else null
+            }
+            else -> null
+        }
+
+        return SpeedRangeResult(minSpeed, maxSpeed, abilityNote)
+    }
 
     /**
      * Clear tracking when battle ends.
@@ -354,6 +615,16 @@ object TeamIndicatorUI {
         // Find the player's actor if they're in the battle
         val playerActor = battle.side1.actors.find { it.uuid == playerUUID }
             ?: battle.side2.actors.find { it.uuid == playerUUID }
+
+        // Initialize PP tracking for all player's Pokemon (idempotent - only initializes once)
+        playerActor?.pokemon?.forEach { pokemon ->
+            BattleStateTracker.initializeMoves(
+                pokemon.uuid,
+                pokemon.moveSet.getMoves().map {
+                    BattleStateTracker.TrackedMove(it.displayName.string, it.currentPp, it.maxPp)
+                }
+            )
+        }
 
         // Render LEFT side (side1) - player's team if they're on side1, otherwise tracked
         if (playerInSide1 && playerActor != null) {
@@ -986,6 +1257,23 @@ object TeamIndicatorUI {
         return null
     }
 
+    /**
+     * Get ClientBattlePokemon by UUID (used to access level and species from properties).
+     */
+    private fun getClientBattlePokemonByUuid(uuid: UUID): ClientBattlePokemon? {
+        val battle = CobblemonClient.battle ?: return null
+        for (side in listOf(battle.side1, battle.side2)) {
+            for (actor in side.actors) {
+                for (active in actor.activePokemon) {
+                    active.battlePokemon?.let {
+                        if (it.uuid == uuid) return it
+                    }
+                }
+            }
+        }
+        return null
+    }
+
     private fun getPokemonNameFromUuid(uuid: UUID): String? {
         val battle = CobblemonClient.battle ?: return null
         for (side in listOf(battle.side1, battle.side2)) {
@@ -1014,16 +1302,36 @@ object TeamIndicatorUI {
             }
             ?: 0f
 
+        // Get ClientBattlePokemon for level and species info
+        val clientBattlePokemon = getClientBattlePokemonByUuid(uuid)
+
+        // Get level: from ClientBattlePokemon properties, or from Pokemon object for player's own
+        val level: Int? = clientBattlePokemon?.properties?.level
+            ?: battlePokemon?.level
+
+        // Get species name: from tracked data, ClientBattlePokemon, or Pokemon object
+        val speciesName: String? = trackedPokemon?.speciesIdentifier?.path
+            ?: clientBattlePokemon?.properties?.species
+            ?: battlePokemon?.species?.name
+
         // For player's own Pokemon, show ALL moves and item directly from Pokemon data
         // For opponent/spectated Pokemon, only show revealed moves and tracked items
-        val moves: Set<String>
+        val moves: List<MoveInfo>
         val item: BattleStateTracker.TrackedItem?
+        val actualSpeed: Int?
+        val abilityName: String?
 
         if (isPlayerPokemon && battlePokemon != null) {
-            // Player's Pokemon: show all moves
-            moves = battlePokemon.moveSet.getMoves()
-                .map { it.displayName.string }
-                .toSet()
+            // Use tracked PP (which updates when moves are used) - initialized in render()
+            val trackedMoves = BattleStateTracker.getTrackedMoves(uuid)
+            moves = if (trackedMoves != null) {
+                trackedMoves.map { MoveInfo(it.name, currentPp = it.currentPp, maxPp = it.maxPp) }
+            } else {
+                // Fallback to Pokemon data if tracking not initialized
+                battlePokemon.moveSet.getMoves().map {
+                    MoveInfo(it.displayName.string, currentPp = it.currentPp, maxPp = it.maxPp)
+                }
+            }
             // Player's Pokemon: show actual held item (if any)
             val heldItem = battlePokemon.heldItem()
             item = if (!heldItem.isEmpty) {
@@ -1038,10 +1346,29 @@ object TeamIndicatorUI {
                 // No item held - check if one was consumed/knocked off
                 BattleStateTracker.getItem(uuid)
             }
+            // Get actual speed stat and ability for player's Pokemon
+            actualSpeed = battlePokemon.speed
+            abilityName = battlePokemon.ability.name
         } else {
-            // Opponent/spectated: only show revealed info
-            moves = BattleStateTracker.getRevealedMoves(uuid)
+            // Opponent/spectated: show revealed moves with estimated PP (assumes PP Max)
+            moves = BattleStateTracker.getRevealedMoves(uuid).map { moveName ->
+                val usageCount = BattleStateTracker.getMoveUsageCount(uuid, moveName)
+                // Look up base PP from move template (try lowercase for registry lookup)
+                val basePp = Moves.getByName(moveName.lowercase().replace(" ", ""))?.pp
+                    ?: Moves.getByName(moveName)?.pp
+                if (basePp != null) {
+                    // Assume PP Max (base * 8/5) for competitive Pokemon
+                    val estimatedMax = basePp * 8 / 5
+                    val estimatedRemaining = (estimatedMax - usageCount).coerceAtLeast(0)
+                    MoveInfo(moveName, estimatedRemaining = estimatedRemaining, estimatedMax = estimatedMax)
+                } else {
+                    // Unknown move - just show usage count
+                    MoveInfo(moveName, usageCount = usageCount)
+                }
+            }
             item = BattleStateTracker.getItem(uuid)
+            actualSpeed = null  // Can't know opponent's actual speed
+            abilityName = null  // Don't know opponent's ability
         }
 
         return TooltipData(
@@ -1049,10 +1376,15 @@ object TeamIndicatorUI {
             hpPercent = hpPercent,
             statusCondition = trackedPokemon?.status ?: battlePokemon?.status?.status,
             isKO = trackedPokemon?.isKO ?: isPokemonKO(uuid),
-            revealedMoves = moves,
+            moves = moves,
             item = item,
             statChanges = BattleStateTracker.getStatChanges(uuid),
-            volatileStatuses = BattleStateTracker.getVolatileStatuses(uuid)
+            volatileStatuses = BattleStateTracker.getVolatileStatuses(uuid),
+            level = level,
+            speciesName = speciesName,
+            isPlayerPokemon = isPlayerPokemon,
+            actualSpeed = actualSpeed,
+            abilityName = abilityName
         )
     }
 
@@ -1088,11 +1420,29 @@ object TeamIndicatorUI {
             lines.add("Status: $statusName" to getStatusTextColor(status))
         }
 
-        // Revealed moves
-        if (data.revealedMoves.isNotEmpty()) {
+        // Moves (with PP - exact for player, estimated range for opponent)
+        if (data.moves.isNotEmpty()) {
             lines.add("Moves:" to TOOLTIP_LABEL)
-            for (move in data.revealedMoves.take(4)) {
-                lines.add("  $move" to TOOLTIP_TEXT)
+            for (move in data.moves.take(4)) {
+                val moveText = if (data.isPlayerPokemon) {
+                    // Player's Pokemon: show exact remaining PP / max PP
+                    if (move.currentPp != null && move.maxPp != null) {
+                        "  ${move.name} (${move.currentPp}/${move.maxPp})"
+                    } else {
+                        "  ${move.name}"
+                    }
+                } else {
+                    // Opponent: show estimated remaining/max PP
+                    if (move.estimatedRemaining != null && move.estimatedMax != null) {
+                        "  ${move.name} (~${move.estimatedRemaining}/${move.estimatedMax})"
+                    } else if (move.usageCount != null) {
+                        // Unknown move - show usage count
+                        "  ${move.name} (used ×${move.usageCount})"
+                    } else {
+                        "  ${move.name}"
+                    }
+                }
+                lines.add(moveText to TOOLTIP_TEXT)
             }
         }
 
@@ -1124,6 +1474,47 @@ object TeamIndicatorUI {
                 else -> TOOLTIP_STAT_DROP
             }
             lines.add("Stats: $statText" to statColor)
+        }
+
+        // Speed tier display with ability/status/item modifiers
+        val speedStage = data.statChanges[BattleStateTracker.BattleStat.SPEED] ?: 0
+        if (data.isPlayerPokemon && data.actualSpeed != null) {
+            // Player's Pokemon: show effective speed with all modifiers
+            val itemName = data.item?.name
+            val itemConsumed = data.item?.status == BattleStateTracker.ItemStatus.CONSUMED
+            val effectiveSpeed = calculateEffectiveSpeed(
+                data.actualSpeed, speedStage, data.abilityName,
+                data.statusCondition, itemName, itemConsumed
+            )
+            // Build modifier notes
+            val modifiers = mutableListOf<String>()
+            if (speedStage != 0) modifiers.add(if (speedStage > 0) "+$speedStage" else "$speedStage")
+            val abilityMult = getAbilitySpeedMultiplier(
+                data.abilityName, BattleStateTracker.weather?.type, BattleStateTracker.terrain?.type,
+                data.statusCondition != null, itemConsumed
+            )
+            if (abilityMult != 1.0) modifiers.add("${data.abilityName}")
+            if (data.statusCondition == Statuses.PARALYSIS && normalizeAbilityName(data.abilityName) != "quickfeet") {
+                modifiers.add("Para")
+            }
+            if (itemName != null && getItemSpeedMultiplier(itemName) != 1.0 && !itemConsumed) {
+                modifiers.add(itemName)
+            }
+            val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
+            lines.add("Speed: $effectiveSpeed$modText" to TOOLTIP_SPEED)
+        } else if (data.speciesName != null && data.level != null) {
+            // Opponent: show min-max speed range with ability considerations
+            val speedRange = calculateOpponentSpeedRange(
+                data.speciesName, data.level, speedStage, data.statusCondition, data.item
+            )
+            if (speedRange != null) {
+                val modifiers = mutableListOf<String>()
+                if (speedStage != 0) modifiers.add(if (speedStage > 0) "+$speedStage" else "$speedStage")
+                speedRange.abilityNote?.let { modifiers.add(it) }
+                if (data.statusCondition == Statuses.PARALYSIS) modifiers.add("Para?")
+                val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
+                lines.add("Speed: ${speedRange.minSpeed}-${speedRange.maxSpeed}$modText" to TOOLTIP_SPEED)
+            }
         }
 
         // Volatile statuses

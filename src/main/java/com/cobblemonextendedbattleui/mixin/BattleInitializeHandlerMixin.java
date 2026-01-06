@@ -39,9 +39,12 @@ public class BattleInitializeHandlerMixin {
             boolean isPlayerInSide2 = isPlayerInSide(packet.getSide2(), playerUUID);
             boolean isSpectating = !isPlayerInSide1 && !isPlayerInSide2;
 
-            // For participants: side1 is ally if player is in side1
-            // For spectators: side1 is treated as "ally" (left side)
-            boolean side1IsAlly = isPlayerInSide1 || isSpectating;
+            // Cobblemon's BattleOverlay swaps sides based on player presence:
+            // - If player is in side1: side1 is LEFT (ally), side2 is RIGHT
+            // - If player is in side2: side2 is LEFT (ally), side1 is RIGHT
+            // - If spectating: side2 is LEFT (ally), side1 is RIGHT
+            // So side1 is "ally" only when the player is actually in side1
+            boolean side1IsAlly = isPlayerInSide1;
 
             // Only set up BattleStateTracker if needed
             if (needsStateTracking) {

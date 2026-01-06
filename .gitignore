@@ -30,3 +30,6 @@ local.properties
 # Claude Code
 .claude/
 CLAUDE.md
+
+# Base Mod
+cobblemon/

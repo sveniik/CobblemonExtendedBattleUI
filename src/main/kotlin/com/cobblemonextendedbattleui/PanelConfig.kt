@@ -44,10 +44,16 @@ object PanelConfig {
     var panelY: Int? = null
         private set
 
-    // Panel dimensions (null = use content-based sizing)
+    // Expanded panel dimensions (null = use content-based sizing)
     var panelWidth: Int? = null
         private set
     var panelHeight: Int? = null
+        private set
+
+    // Collapsed panel dimensions (null = use content-based sizing)
+    var collapsedWidth: Int? = null
+        private set
+    var collapsedHeight: Int? = null
         private set
 
     // Font scale multiplier (user-adjustable via Ctrl+Scroll)
@@ -127,6 +133,8 @@ object PanelConfig {
         val panelY: Int? = null,
         val panelWidth: Int? = null,
         val panelHeight: Int? = null,
+        val collapsedWidth: Int? = null,
+        val collapsedHeight: Int? = null,
         val fontScale: Float = 1.0f,
         val startExpanded: Boolean = false,
         // Battle log widget settings
@@ -153,6 +161,8 @@ object PanelConfig {
                 panelY = data.panelY
                 panelWidth = data.panelWidth
                 panelHeight = data.panelHeight
+                collapsedWidth = data.collapsedWidth
+                collapsedHeight = data.collapsedHeight
                 fontScale = data.fontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
                 startExpanded = data.startExpanded
                 // Battle log widget settings
@@ -180,6 +190,8 @@ object PanelConfig {
                 panelY = panelY,
                 panelWidth = panelWidth,
                 panelHeight = panelHeight,
+                collapsedWidth = collapsedWidth,
+                collapsedHeight = collapsedHeight,
                 fontScale = fontScale,
                 startExpanded = startExpanded,
                 logX = logX,
@@ -211,6 +223,17 @@ object PanelConfig {
         panelWidth = width?.coerceIn(getMinWidth(), getMaxWidth(screenWidth))
         panelHeight = height?.coerceIn(getMinHeight(), getMaxHeight(screenHeight))
     }
+
+    fun setCollapsedDimensions(width: Int?, height: Int?) {
+        val mc = MinecraftClient.getInstance()
+        val screenWidth = mc.window.scaledWidth
+        val screenHeight = mc.window.scaledHeight
+
+        collapsedWidth = width?.coerceIn(getMinWidth(), getMaxWidth(screenWidth))
+        collapsedHeight = height?.coerceIn(getMinCollapsedHeight(), getMaxHeight(screenHeight))
+    }
+
+    fun getMinCollapsedHeight(): Int = 40  // Smaller minimum for collapsed
 
     fun setStartExpanded(expanded: Boolean) {
         startExpanded = expanded

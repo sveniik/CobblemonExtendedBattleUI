@@ -148,9 +148,7 @@ object BattleInfoPanel {
     }
 
     private fun getResizeZone(mouseX: Int, mouseY: Int): UIUtils.ResizeZone {
-        // No resizing in collapsed mode - use custom logic due to reduced top zone
-        if (!isExpanded) return UIUtils.ResizeZone.NONE
-
+        // Resizing is enabled for both expanded and collapsed modes
         val x = panelBoundsX
         val y = panelBoundsY
         val w = panelBoundsW
@@ -314,7 +312,7 @@ object BattleInfoPanel {
                     }
 
                     val minW = PanelConfig.getMinWidth()
-                    val minH = PanelConfig.getMinHeight()
+                    val minH = if (isExpanded) PanelConfig.getMinHeight() else PanelConfig.getMinCollapsedHeight()
                     val maxW = PanelConfig.getMaxWidth(screenWidth)
                     val maxH = PanelConfig.getMaxHeight(screenHeight)
 
@@ -344,7 +342,12 @@ object BattleInfoPanel {
                     newX = newX.coerceIn(0, screenWidth - newWidth)
                     newY = newY.coerceIn(0, screenHeight - newHeight)
 
-                    PanelConfig.setDimensions(newWidth, newHeight)
+                    // Save to appropriate config based on current mode
+                    if (isExpanded) {
+                        PanelConfig.setDimensions(newWidth, newHeight)
+                    } else {
+                        PanelConfig.setCollapsedDimensions(newWidth, newHeight)
+                    }
                     PanelConfig.setPosition(newX, newY)
                 }
                 !wasMousePressed && canInteract && isOverHeader -> {
@@ -466,10 +469,14 @@ object BattleInfoPanel {
         val isSpectating = !playerInSide1 && !playerInSide2
 
         // Determine player/opponent sides (or left/right when spectating)
+        // Cobblemon's BattleOverlay swaps sides based on player presence:
+        // - If player is in side1: side1 is LEFT, side2 is RIGHT
+        // - If player is in side2: side2 is LEFT, side1 is RIGHT
+        // - If spectating: side2 is LEFT, side1 is RIGHT
         val playerSide = when {
             playerInSide1 -> battle.side1
             playerInSide2 -> battle.side2
-            else -> battle.side1  // When spectating, treat side1 as "left" side
+            else -> battle.side2
         }
         val opponentSide = if (playerSide == battle.side1) battle.side2 else battle.side1
 
@@ -536,7 +543,7 @@ object BattleInfoPanel {
         // Update font scaling based on user preference
         updateScaledValues()
 
-        // Get panel dimensions - collapsed auto-fits content, expanded uses user settings
+        // Get panel dimensions - both modes support user resizing
         val panelWidth: Int
         val panelHeight: Int
 
@@ -545,11 +552,11 @@ object BattleInfoPanel {
             contentHeight = calculateExpandedContentHeight(allyPokemonData, opponentPokemonData, panelWidth)
             panelHeight = PanelConfig.panelHeight ?: (contentHeight + HEADER_HEIGHT + PADDING * 2)
         } else {
-            // Collapsed: use same width, auto-fit height to content (never scroll)
-            panelWidth = PanelConfig.panelWidth ?: PanelConfig.DEFAULT_WIDTH
+            // Collapsed: use collapsed dimensions if set, otherwise auto-fit
+            panelWidth = PanelConfig.collapsedWidth ?: PanelConfig.DEFAULT_WIDTH
             contentHeight = calculateCollapsedContentHeight(allyPokemonData, opponentPokemonData)
-            // Use PADDING * 2 to match visibleContentHeight calculation and prevent scrollbar
-            panelHeight = contentHeight + HEADER_HEIGHT + PADDING * 2
+            val autoHeight = contentHeight + HEADER_HEIGHT + PADDING * 2
+            panelHeight = PanelConfig.collapsedHeight ?: autoHeight
         }
 
         val panelX = PanelConfig.panelX ?: (screenWidth - panelWidth - BASE_PANEL_MARGIN)
@@ -575,10 +582,8 @@ object BattleInfoPanel {
             renderCollapsed(context, clampedX, clampedY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData, playerSideNames, opponentSideNames)
         }
 
-        // Only draw resize handles in expanded mode
-        if (isExpanded) {
-            drawResizeHandles(context, clampedX, clampedY, panelWidth, panelHeight)
-        }
+        // Draw resize handles in both expanded and collapsed modes
+        drawResizeHandles(context, clampedX, clampedY, panelWidth, panelHeight)
     }
 
     private fun drawResizeHandles(context: DrawContext, x: Int, y: Int, w: Int, h: Int) {
@@ -609,7 +614,10 @@ object BattleInfoPanel {
 
         context.fill(x, y, x + SCROLLBAR_WIDTH, y + height, SCROLLBAR_BG)
 
-        val thumbHeight = ((visibleContentHeight.toFloat() / contentHeight) * height).toInt().coerceAtLeast(20)
+        // Calculate thumb height with a smaller minimum, and ensure it doesn't exceed available space
+        val minThumbHeight = (height / 4).coerceIn(6, 20)
+        val thumbHeight = ((visibleContentHeight.toFloat() / contentHeight) * height).toInt()
+            .coerceIn(minThumbHeight, height)
         val maxScroll = contentHeight - visibleContentHeight
         val scrollRatio = if (maxScroll > 0) PanelConfig.scrollOffset.toFloat() / maxScroll else 0f
         val thumbY = y + ((height - thumbHeight) * scrollRatio).toInt()
@@ -632,12 +640,17 @@ object BattleInfoPanel {
         drawRoundedRect(context, x, y, width, height, PANEL_BG, BORDER_COLOR)
         renderHeader(context, x, y, width)
 
-        val scissorStartY = y + HEADER_HEIGHT + 2
+        val contentStartY = y + HEADER_HEIGHT + 2
         val contentAreaHeight = height - HEADER_HEIGHT - PADDING / 2
 
-        enableScissor(context, x + 1, scissorStartY, width - 2, contentAreaHeight)
+        // Determine if we need scrollbar space (add threshold to avoid showing for tiny differences)
+        val needsScrollbar = contentHeight > visibleContentHeight + 4
+        val contentWidth = if (needsScrollbar) width - SCROLLBAR_WIDTH - 4 else width - 2
 
-        var currentY = scissorStartY + 2
+        enableScissor(context, x + 1, contentStartY, contentWidth, contentAreaHeight)
+
+        // Apply scroll offset to starting Y position
+        var currentY = contentStartY + 2 - PanelConfig.scrollOffset
 
         val hasWeather = BattleStateTracker.weather != null
         val hasTerrain = BattleStateTracker.terrain != null
@@ -704,6 +717,11 @@ object BattleInfoPanel {
         }
 
         disableScissor()
+
+        // Render scrollbar if content exceeds visible area
+        if (needsScrollbar) {
+            renderScrollbar(context, x + width - SCROLLBAR_WIDTH - 2, contentStartY, contentAreaHeight)
+        }
     }
 
     private fun renderExpanded(

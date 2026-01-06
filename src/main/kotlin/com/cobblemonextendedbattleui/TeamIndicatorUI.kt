@@ -591,26 +591,32 @@ object TeamIndicatorUI {
             val side1Names = battle.side1.actors.map { it.displayName.string }
             val side2Names = battle.side2.actors.map { it.displayName.string }
             CobblemonExtendedBattleUI.LOGGER.debug(
-                "TeamIndicatorUI: Spectating - Side1 (LEFT): $side1Names, Side2 (RIGHT): $side2Names"
+                "TeamIndicatorUI: Spectating - battle.side1: $side1Names, battle.side2: $side2Names (side2 on LEFT)"
             )
         }
 
-        // In Cobblemon's BattleOverlay:
-        // - Side1 tiles are ALWAYS displayed on the LEFT of the screen
-        // - Side2 tiles are ALWAYS displayed on the RIGHT of the screen
-        // We must match this positioning for pokeballs to align with the battle tiles.
+        // Cobblemon's BattleOverlay swaps sides based on player presence:
+        // - If player is in side1: side1 is LEFT, side2 is RIGHT
+        // - If player is in side2: side2 is LEFT, side1 is RIGHT
+        // - If spectating: side2 is LEFT, side1 is RIGHT
+        // We must match this positioning for team preview to align with the battle tiles.
+        val leftSide = when {
+            playerInSide1 -> battle.side1
+            playerInSide2 -> battle.side2
+            else -> battle.side2  // When spectating, side2 is on LEFT
+        }
+        val rightSide = if (leftSide == battle.side1) battle.side2 else battle.side1
 
         // Update tracked Pokemon for both sides from battle data
-        // Side1 is always LEFT, Side2 is always RIGHT
-        updateTrackedPokemonForSide(battle.side1, trackedSide1Pokemon, isLeftSide = true)
-        updateTrackedPokemonForSide(battle.side2, trackedSide2Pokemon, isLeftSide = false)
+        updateTrackedPokemonForSide(leftSide, trackedSide1Pokemon, isLeftSide = true)
+        updateTrackedPokemonForSide(rightSide, trackedSide2Pokemon, isLeftSide = false)
 
         // Count active Pokemon for positioning (determines how many tiles are shown)
-        val side1ActiveCount = battle.side1.actors.sumOf { it.activePokemon.size }
-        val side2ActiveCount = battle.side2.actors.sumOf { it.activePokemon.size }
+        val leftActiveCount = leftSide.actors.sumOf { it.activePokemon.size }
+        val rightActiveCount = rightSide.actors.sumOf { it.activePokemon.size }
 
-        val leftY = calculateIndicatorY(side1ActiveCount)
-        val rightY = calculateIndicatorY(side2ActiveCount)
+        val leftY = calculateIndicatorY(leftActiveCount)
+        val rightY = calculateIndicatorY(rightActiveCount)
 
         // Find the player's actor if they're in the battle
         val playerActor = battle.side1.actors.find { it.uuid == playerUUID }
@@ -626,31 +632,35 @@ object TeamIndicatorUI {
             )
         }
 
-        // Render LEFT side (side1) - player's team if they're on side1, otherwise tracked
-        if (playerInSide1 && playerActor != null) {
-            // Player is on side1 (left) - use battle actor's pokemon list for authoritative data
-            val playerTeam = playerActor.pokemon
+        // Determine if player is on the left or right side
+        val playerOnLeft = playerActor != null && leftSide.actors.any { it.uuid == playerUUID }
+        val playerOnRight = playerActor != null && rightSide.actors.any { it.uuid == playerUUID }
+
+        // Render LEFT side - player's team if they're on left, otherwise tracked
+        if (playerOnLeft) {
+            // Player is on left - use battle actor's pokemon list for authoritative data
+            val playerTeam = playerActor!!.pokemon
             renderBattleTeam(context, HORIZONTAL_INSET, leftY, playerTeam, isLeftSide = true)
         } else {
-            // Side1 is opponent or we're spectating - use tracked Pokemon from battle data
-            val side1Team = trackedSide1Pokemon.values.toList()
-            if (side1Team.isNotEmpty()) {
-                renderTrackedTeam(context, HORIZONTAL_INSET, leftY, side1Team, isLeftSide = true)
+            // Left side is opponent or we're spectating - use tracked Pokemon from battle data
+            val leftTeam = trackedSide1Pokemon.values.toList()
+            if (leftTeam.isNotEmpty()) {
+                renderTrackedTeam(context, HORIZONTAL_INSET, leftY, leftTeam, isLeftSide = true)
             }
         }
 
-        // Render RIGHT side (side2) - player's team if they're on side2, otherwise tracked
-        if (playerInSide2 && playerActor != null) {
-            // Player is on side2 (right) - use battle actor's pokemon list for authoritative data
-            val playerTeam = playerActor.pokemon
+        // Render RIGHT side - player's team if they're on right, otherwise tracked
+        if (playerOnRight) {
+            // Player is on right - use battle actor's pokemon list for authoritative data
+            val playerTeam = playerActor!!.pokemon
             val rightWidth = playerTeam.size * (MODEL_SIZE + MODEL_SPACING) - MODEL_SPACING
             renderBattleTeam(context, screenWidth - HORIZONTAL_INSET - rightWidth, rightY, playerTeam, isLeftSide = false)
         } else {
-            // Side2 is opponent or we're spectating - use tracked Pokemon from battle data
-            val side2Team = trackedSide2Pokemon.values.toList()
-            if (side2Team.isNotEmpty()) {
-                val rightWidth = side2Team.size * (MODEL_SIZE + MODEL_SPACING) - MODEL_SPACING
-                renderTrackedTeam(context, screenWidth - HORIZONTAL_INSET - rightWidth, rightY, side2Team, isLeftSide = false)
+            // Right side is opponent or we're spectating - use tracked Pokemon from battle data
+            val rightTeam = trackedSide2Pokemon.values.toList()
+            if (rightTeam.isNotEmpty()) {
+                val rightWidth = rightTeam.size * (MODEL_SIZE + MODEL_SPACING) - MODEL_SPACING
+                renderTrackedTeam(context, screenWidth - HORIZONTAL_INSET - rightWidth, rightY, rightTeam, isLeftSide = false)
             }
         }
 

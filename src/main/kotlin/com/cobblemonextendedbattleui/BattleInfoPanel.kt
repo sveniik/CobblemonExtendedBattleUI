@@ -220,7 +220,7 @@ object BattleInfoPanel {
 
         // Font keybinds - only handle if no other panel has priority
         // Priority: TeamIndicatorUI (tooltip/team panels) > BattleLogWidget > BattleInfoPanel (default)
-        val otherPanelHasPriority = TeamIndicatorUI.shouldHandleFontInput() || BattleLogWidget.isMouseOverWidget()
+        val otherPanelHasPriority = TeamIndicatorUI.shouldHandleFontInput() || BattleLogWidget.isMouseOverWidget() || MoveTooltipRenderer.shouldHandleFontInput()
 
         val increaseKey = InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.increaseFontKey.boundKeyTranslationKey)
         val isIncreaseDown = UIUtils.isKeyOrButtonPressed(handle, increaseKey)

@@ -2,6 +2,7 @@ package com.cobblemonextendedbattleui.mixin;
 
 import com.cobblemonextendedbattleui.BattleInfoPanel;
 import com.cobblemonextendedbattleui.BattleLogWidget;
+import com.cobblemonextendedbattleui.MoveTooltipRenderer;
 import com.cobblemonextendedbattleui.PanelConfig;
 import com.cobblemonextendedbattleui.TeamIndicatorUI;
 import com.cobblemon.mod.common.client.CobblemonClient;
@@ -32,7 +33,13 @@ public abstract class MouseScrollMixin {
     private void onScroll(long window, double horizontal, double vertical, CallbackInfo ci) {
         // Only intercept during battle
         if (CobblemonClient.INSTANCE.getBattle() != null) {
-            // Let the tooltip try to handle the scroll first (highest priority, appears on top)
+            // Let the move tooltip try to handle the scroll first (highest priority when in Fight menu)
+            if (PanelConfig.INSTANCE.getEnableMoveTooltips() &&
+                MoveTooltipRenderer.INSTANCE.handleScroll(vertical)) {
+                ci.cancel();
+                return;
+            }
+            // Then let the team indicator tooltip try
             if (PanelConfig.INSTANCE.getEnableTeamIndicators() &&
                 TeamIndicatorUI.INSTANCE.handleScroll(vertical)) {
                 ci.cancel();

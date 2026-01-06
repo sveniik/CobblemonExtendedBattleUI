@@ -31,6 +31,10 @@ object PanelConfig {
     var enableBattleLog: Boolean = true
         private set
 
+    // Enable/disable move tooltips on Fight menu (shows power, accuracy, effectiveness)
+    var enableMoveTooltips: Boolean = true
+        private set
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Configuration values
     // ═══════════════════════════════════════════════════════════════════════════
@@ -99,6 +103,10 @@ object PanelConfig {
     var tooltipFontScale: Float = 1.0f
         private set
 
+    // Move tooltip font scale (for Fight menu tooltips)
+    var moveTooltipFontScale: Float = 1.0f
+        private set
+
     // Default log dimensions
     const val DEFAULT_LOG_WIDTH = 200
     const val DEFAULT_LOG_HEIGHT = 120
@@ -128,6 +136,7 @@ object PanelConfig {
         val enableTeamIndicators: Boolean = true,
         val enableBattleInfoPanel: Boolean = true,
         val enableBattleLog: Boolean = true,
+        val enableMoveTooltips: Boolean = true,
         // Panel settings
         val panelX: Int? = null,
         val panelY: Int? = null,
@@ -145,7 +154,8 @@ object PanelConfig {
         val logFontScale: Float = 1.0f,
         val logExpanded: Boolean = true,
         // Tooltip settings
-        val tooltipFontScale: Float = 1.0f
+        val tooltipFontScale: Float = 1.0f,
+        val moveTooltipFontScale: Float = 1.0f
     )
 
     fun load() {
@@ -156,6 +166,7 @@ object PanelConfig {
                 enableTeamIndicators = data.enableTeamIndicators
                 enableBattleInfoPanel = data.enableBattleInfoPanel
                 enableBattleLog = data.enableBattleLog
+                enableMoveTooltips = data.enableMoveTooltips
                 // Panel settings
                 panelX = data.panelX
                 panelY = data.panelY
@@ -173,7 +184,8 @@ object PanelConfig {
                 logFontScale = data.logFontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
                 logExpanded = data.logExpanded
                 tooltipFontScale = data.tooltipFontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
-                CobblemonExtendedBattleUI.LOGGER.info("PanelConfig: Loaded config - features: team=$enableTeamIndicators, panel=$enableBattleInfoPanel, log=$enableBattleLog")
+                moveTooltipFontScale = data.moveTooltipFontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+                CobblemonExtendedBattleUI.LOGGER.info("PanelConfig: Loaded config - features: team=$enableTeamIndicators, panel=$enableBattleInfoPanel, log=$enableBattleLog, moveTooltips=$enableMoveTooltips")
             }
         } catch (e: Exception) {
             CobblemonExtendedBattleUI.LOGGER.warn("PanelConfig: Failed to load config, using defaults: ${e.message}")
@@ -186,6 +198,7 @@ object PanelConfig {
                 enableTeamIndicators = enableTeamIndicators,
                 enableBattleInfoPanel = enableBattleInfoPanel,
                 enableBattleLog = enableBattleLog,
+                enableMoveTooltips = enableMoveTooltips,
                 panelX = panelX,
                 panelY = panelY,
                 panelWidth = panelWidth,
@@ -200,7 +213,8 @@ object PanelConfig {
                 logHeight = logHeight,
                 logFontScale = logFontScale,
                 logExpanded = logExpanded,
-                tooltipFontScale = tooltipFontScale
+                tooltipFontScale = tooltipFontScale,
+                moveTooltipFontScale = moveTooltipFontScale
             )
             configFile.parentFile?.mkdirs()
             configFile.writeText(gson.toJson(data))
@@ -271,6 +285,10 @@ object PanelConfig {
 
     fun adjustTooltipFontScale(delta: Float) {
         tooltipFontScale = (tooltipFontScale + delta).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+    }
+
+    fun adjustMoveTooltipFontScale(delta: Float) {
+        moveTooltipFontScale = (moveTooltipFontScale + delta).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
     }
 
     fun setLogExpanded(expanded: Boolean) {

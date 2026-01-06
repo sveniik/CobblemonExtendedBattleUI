@@ -5,6 +5,7 @@ import com.cobblemon.mod.common.api.pokemon.PokemonSpecies
 import com.cobblemon.mod.common.api.pokemon.stats.Stats
 import com.cobblemon.mod.common.api.pokemon.status.Statuses
 import com.cobblemon.mod.common.api.pokemon.status.Status
+import com.cobblemon.mod.common.api.types.ElementalType
 import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.battle.ClientBattlePokemon
 import com.cobblemon.mod.common.client.battle.ClientBattleSide
@@ -108,6 +109,8 @@ object TeamIndicatorUI {
         var hpPercent: Float,  // 0.0 to 1.0
         var status: Status?,
         var isKO: Boolean,
+        // Display name (persists after switch-out)
+        var displayName: String? = null,
         // For model rendering
         var speciesIdentifier: Identifier? = null,
         var aspects: Set<String> = emptySet(),
@@ -187,7 +190,9 @@ object TeamIndicatorUI {
         val speciesName: String?,
         val isPlayerPokemon: Boolean,
         val actualSpeed: Int? = null,
-        val abilityName: String? = null  // For speed modifier calculation
+        val abilityName: String? = null,  // For speed modifier calculation
+        val primaryType: ElementalType? = null,
+        val secondaryType: ElementalType? = null
     )
 
     // Currently rendered pokeball bounds (refreshed each frame)
@@ -214,6 +219,7 @@ object TeamIndicatorUI {
     private val TOOLTIP_TEXT = color(220, 225, 230, 255)
     private val TOOLTIP_HEADER = color(255, 255, 255, 255)
     private val TOOLTIP_LABEL = color(140, 150, 165, 255)
+    private val TOOLTIP_DIM = color(100, 110, 120, 255)
     private val TOOLTIP_HP_HIGH = color(100, 220, 100, 255)
     private val TOOLTIP_HP_MED = color(220, 180, 50, 255)
     private val TOOLTIP_HP_LOW = color(220, 80, 80, 255)
@@ -223,7 +229,9 @@ object TeamIndicatorUI {
     private const val TOOLTIP_CORNER = 3
     private const val TOOLTIP_BASE_LINE_HEIGHT = 10  // Base line height before scaling
     private const val TOOLTIP_FONT_SCALE = 0.85f     // Base font scale multiplier
-    private val TOOLTIP_SPEED = color(150, 180, 220, 255)  // Light blue for speed info
+    private val TOOLTIP_SPEED = color(150, 180, 220, 255)
+    private val TOOLTIP_PP = color(255, 210, 80, 255)
+    private val TOOLTIP_PP_LOW = color(255, 100, 80, 255)
 
     // ================== Stat Calculation Utilities ==================
 
@@ -832,6 +840,7 @@ object TeamIndicatorUI {
         val speciesName = battlePokemon.properties.species
         val speciesId = speciesName?.let { Identifier.of("cobblemon", it) }
         val aspects = battlePokemon.state.currentAspects
+        val displayName = battlePokemon.displayName.string
 
         // If HP is 0, add to persistent KO tracking
         // This catches KO status even if faint message hasn't arrived yet
@@ -848,6 +857,8 @@ object TeamIndicatorUI {
                 existing.hpPercent = hpPercent
                 existing.status = status
                 existing.isKO = isKO || knockedOutPokemon.contains(uuid)
+                // Update display name if we have one (persist the name)
+                if (displayName.isNotEmpty()) existing.displayName = displayName
                 // Always update the current species (for transformed Pokemon, this shows the transformed form)
                 // The original form is tracked separately in originalSpeciesIdentifier
                 existing.speciesIdentifier = speciesId ?: existing.speciesIdentifier
@@ -872,6 +883,7 @@ object TeamIndicatorUI {
                     hpPercent = hpPercent,
                     status = status,
                     isKO = isKO || knockedOutPokemon.contains(uuid),
+                    displayName = displayName.ifEmpty { null },
                     speciesIdentifier = speciesId,
                     aspects = aspects,
                     originalSpeciesIdentifier = originalSpecies,
@@ -1336,6 +1348,7 @@ object TeamIndicatorUI {
     private fun getTooltipData(uuid: UUID, trackedPokemon: TrackedPokemon?, battlePokemon: Pokemon?, isPlayerPokemon: Boolean): TooltipData {
         val name = battlePokemon?.getDisplayName()?.string
             ?: getPokemonNameFromUuid(uuid)
+            ?: trackedPokemon?.displayName
             ?: "Unknown"
 
         val hpPercent = trackedPokemon?.hpPercent
@@ -1413,6 +1426,11 @@ object TeamIndicatorUI {
             abilityName = null  // Don't know opponent's ability
         }
 
+        // Get types from species (name must be lowercase for registry lookup)
+        val species = speciesName?.let { PokemonSpecies.getByName(it.lowercase()) }
+        val primaryType = species?.primaryType
+        val secondaryType = species?.secondaryType
+
         return TooltipData(
             pokemonName = name,
             hpPercent = hpPercent,
@@ -1426,7 +1444,9 @@ object TeamIndicatorUI {
             speciesName = speciesName,
             isPlayerPokemon = isPlayerPokemon,
             actualSpeed = actualSpeed,
-            abilityName = abilityName
+            abilityName = abilityName,
+            primaryType = primaryType,
+            secondaryType = secondaryType
         )
     }
 
@@ -1440,11 +1460,22 @@ object TeamIndicatorUI {
         val fontScale = TOOLTIP_FONT_SCALE * PanelConfig.tooltipFontScale
         val lineHeight = (TOOLTIP_BASE_LINE_HEIGHT * fontScale).toInt().coerceAtLeast(8)
 
-        // Build tooltip lines: (text, color)
-        val lines = mutableListOf<Pair<String, Int>>()
+        // Build tooltip lines: each line is a list of (text, color) segments
+        val lines = mutableListOf<List<Pair<String, Int>>>()
 
-        // Pokemon name header
-        lines.add(data.pokemonName to TOOLTIP_HEADER)
+        val nameColor = data.primaryType?.let { UIUtils.getTypeColor(it) } ?: TOOLTIP_HEADER
+        lines.add(listOf(data.pokemonName to nameColor))
+
+        // Types
+        if (data.primaryType != null) {
+            val typeSegments = mutableListOf<Pair<String, Int>>()
+            typeSegments.add(data.primaryType.displayName.string to UIUtils.getTypeColor(data.primaryType))
+            if (data.secondaryType != null) {
+                typeSegments.add(" / " to TOOLTIP_DIM)
+                typeSegments.add(data.secondaryType.displayName.string to UIUtils.getTypeColor(data.secondaryType))
+            }
+            lines.add(typeSegments)
+        }
 
         // HP percentage
         val hpColor = when {
@@ -1454,37 +1485,49 @@ object TeamIndicatorUI {
             else -> TOOLTIP_HP_LOW
         }
         val hpText = if (data.isKO) "HP: KO'd" else "HP: ${(data.hpPercent * 100).toInt()}%"
-        lines.add(hpText to hpColor)
+        lines.add(listOf(hpText to hpColor))
 
         // Status condition
         data.statusCondition?.let { status ->
             val statusName = getStatusDisplayName(status)
-            lines.add("Status: $statusName" to getStatusTextColor(status))
+            lines.add(listOf("Status: $statusName" to getStatusTextColor(status)))
         }
 
         // Moves (with PP - exact for player, estimated range for opponent)
         if (data.moves.isNotEmpty()) {
-            lines.add("Moves:" to TOOLTIP_LABEL)
+            lines.add(listOf("Moves:" to TOOLTIP_LABEL))
             for (move in data.moves.take(4)) {
-                val moveText = if (data.isPlayerPokemon) {
-                    // Player's Pokemon: show exact remaining PP / max PP
+                val moveSegments = mutableListOf<Pair<String, Int>>()
+
+                // Look up move type for coloring (try lowercase registry name)
+                val moveTemplate = Moves.getByName(move.name.lowercase().replace(" ", ""))
+                    ?: Moves.getByName(move.name.lowercase())
+                val moveColor = moveTemplate?.let { UIUtils.getTypeColor(it.elementalType) } ?: TOOLTIP_TEXT
+                moveSegments.add("  ${move.name}" to moveColor)
+
+                if (data.isPlayerPokemon) {
+                    // Player's Pokemon: show exact remaining PP / max PP with color
                     if (move.currentPp != null && move.maxPp != null) {
-                        "  ${move.name} (${move.currentPp}/${move.maxPp})"
-                    } else {
-                        "  ${move.name}"
+                        val ppRatio = move.currentPp.toFloat() / move.maxPp.coerceAtLeast(1)
+                        val ppColor = if (ppRatio <= 0.25f) TOOLTIP_PP_LOW else TOOLTIP_PP
+                        moveSegments.add(" (" to TOOLTIP_DIM)
+                        moveSegments.add("${move.currentPp}/${move.maxPp}" to ppColor)
+                        moveSegments.add(")" to TOOLTIP_DIM)
                     }
                 } else {
                     // Opponent: show estimated remaining/max PP
                     if (move.estimatedRemaining != null && move.estimatedMax != null) {
-                        "  ${move.name} (~${move.estimatedRemaining}/${move.estimatedMax})"
+                        val ppRatio = move.estimatedRemaining.toFloat() / move.estimatedMax.coerceAtLeast(1)
+                        val ppColor = if (ppRatio <= 0.25f) TOOLTIP_PP_LOW else TOOLTIP_PP
+                        moveSegments.add(" (~" to TOOLTIP_DIM)
+                        moveSegments.add("${move.estimatedRemaining}/${move.estimatedMax}" to ppColor)
+                        moveSegments.add(")" to TOOLTIP_DIM)
                     } else if (move.usageCount != null) {
                         // Unknown move - show usage count
-                        "  ${move.name} (used ×${move.usageCount})"
-                    } else {
-                        "  ${move.name}"
+                        moveSegments.add(" (used ×${move.usageCount})" to TOOLTIP_DIM)
                     }
                 }
-                lines.add(moveText to TOOLTIP_TEXT)
+                lines.add(moveSegments)
             }
         }
 
@@ -1497,25 +1540,21 @@ object TeamIndicatorUI {
                 BattleStateTracker.ItemStatus.CONSUMED -> "Item: ${item.name} (used)"
             }
             val itemColor = if (item.status == BattleStateTracker.ItemStatus.HELD) TOOLTIP_TEXT else TOOLTIP_LABEL
-            lines.add(itemText to itemColor)
+            lines.add(listOf(itemText to itemColor))
         }
 
         // Stat changes
         if (data.statChanges.isNotEmpty()) {
-            val statText = data.statChanges.entries
-                .sortedBy { it.key.ordinal }
-                .joinToString(" ") { (stat, value) ->
-                    val sign = if (value > 0) "+" else ""
-                    "${stat.abbr}$sign$value"
-                }
-            val hasBoosts = data.statChanges.values.any { it > 0 }
-            val hasDrops = data.statChanges.values.any { it < 0 }
-            val statColor = when {
-                hasBoosts && hasDrops -> TOOLTIP_TEXT
-                hasBoosts -> TOOLTIP_STAT_BOOST
-                else -> TOOLTIP_STAT_DROP
+            val statSegments = mutableListOf<Pair<String, Int>>()
+            statSegments.add("Stats: " to TOOLTIP_LABEL)
+            val sortedStats = data.statChanges.entries.sortedBy { it.key.ordinal }
+            sortedStats.forEachIndexed { index, (stat, value) ->
+                if (index > 0) statSegments.add(" " to TOOLTIP_LABEL)
+                val sign = if (value > 0) "+" else ""
+                val statColor = if (value > 0) TOOLTIP_STAT_BOOST else TOOLTIP_STAT_DROP
+                statSegments.add("${stat.abbr}$sign$value" to statColor)
             }
-            lines.add("Stats: $statText" to statColor)
+            lines.add(statSegments)
         }
 
         // Speed tier display with ability/status/item modifiers
@@ -1543,7 +1582,7 @@ object TeamIndicatorUI {
                 modifiers.add(itemName)
             }
             val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
-            lines.add("Speed: $effectiveSpeed$modText" to TOOLTIP_SPEED)
+            lines.add(listOf("Speed: $effectiveSpeed$modText" to TOOLTIP_SPEED))
         } else if (data.speciesName != null && data.level != null) {
             // Opponent: show min-max speed range with ability considerations
             val speedRange = calculateOpponentSpeedRange(
@@ -1555,7 +1594,7 @@ object TeamIndicatorUI {
                 speedRange.abilityNote?.let { modifiers.add(it) }
                 if (data.statusCondition == Statuses.PARALYSIS) modifiers.add("Para?")
                 val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
-                lines.add("Speed: ${speedRange.minSpeed}-${speedRange.maxSpeed}$modText" to TOOLTIP_SPEED)
+                lines.add(listOf("Speed: ${speedRange.minSpeed}-${speedRange.maxSpeed}$modText" to TOOLTIP_SPEED))
             }
         }
 
@@ -1563,11 +1602,13 @@ object TeamIndicatorUI {
         if (data.volatileStatuses.isNotEmpty()) {
             val volatileText = data.volatileStatuses.take(3).joinToString(", ") { it.type.displayName }
             val suffix = if (data.volatileStatuses.size > 3) "..." else ""
-            lines.add("Effects: $volatileText$suffix" to TOOLTIP_LABEL)
+            lines.add(listOf("Effects: $volatileText$suffix" to TOOLTIP_LABEL))
         }
 
-        // Calculate dimensions with scaled text
-        val maxLineWidth = lines.maxOfOrNull { (textRenderer.getWidth(it.first) * fontScale).toInt() } ?: 80
+        // Calculate dimensions - sum up segment widths for each line
+        val maxLineWidth = lines.maxOfOrNull { segments ->
+            segments.sumOf { (text, _) -> (textRenderer.getWidth(text) * fontScale).toInt() }
+        } ?: 80
         val tooltipWidth = maxLineWidth + TOOLTIP_PADDING * 2
         val tooltipHeight = lines.size * lineHeight + TOOLTIP_PADDING * 2
 
@@ -1586,23 +1627,34 @@ object TeamIndicatorUI {
         // Store tooltip bounds for input handling
         tooltipBounds = TooltipBoundsData(tooltipX, tooltipY, tooltipWidth, tooltipHeight)
 
+        // Push z-level forward so tooltip renders on top of other UI elements
+        val matrices = context.matrices
+        matrices.push()
+        matrices.translate(0.0, 0.0, 400.0)
+
         // Draw rounded background
         drawTooltipBackground(context, tooltipX, tooltipY, tooltipWidth, tooltipHeight)
 
-        // Draw text lines with scaling
+        // Draw text lines with scaling (each line can have multiple colored segments)
         var lineY = tooltipY + TOOLTIP_PADDING
-        for ((text, textColor) in lines) {
-            drawScaledText(
-                context = context,
-                text = Text.literal(text),
-                x = (tooltipX + TOOLTIP_PADDING).toFloat(),
-                y = lineY.toFloat(),
-                colour = applyOpacity(textColor),
-                scale = fontScale,
-                shadow = false
-            )
+        for (segments in lines) {
+            var segmentX = (tooltipX + TOOLTIP_PADDING).toFloat()
+            for ((text, textColor) in segments) {
+                drawScaledText(
+                    context = context,
+                    text = Text.literal(text),
+                    x = segmentX,
+                    y = lineY.toFloat(),
+                    colour = applyOpacity(textColor),
+                    scale = fontScale,
+                    shadow = false
+                )
+                segmentX += textRenderer.getWidth(text) * fontScale
+            }
             lineY += lineHeight
         }
+
+        matrices.pop()
     }
 
     /**
@@ -1657,6 +1709,7 @@ object TeamIndicatorUI {
         context.fill(x + width - 2, y + height - 2, x + width - 1, y + height - 1, border)
         context.fill(x + width - 1, y + height - corner, x + width, y + height - 2, border)
     }
+
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Tooltip Input Handling

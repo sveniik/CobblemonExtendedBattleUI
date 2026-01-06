@@ -1,5 +1,6 @@
 package com.cobblemonextendedbattleui
 
+import com.cobblemon.mod.common.api.types.ElementalType
 import com.cobblemon.mod.common.client.render.drawScaledText
 import com.mojang.blaze3d.systems.RenderSystem
 import net.minecraft.client.MinecraftClient
@@ -67,6 +68,21 @@ object UIUtils {
      * Creates an ARGB color from component values.
      */
     fun color(r: Int, g: Int, b: Int, a: Int = 255): Int = (a shl 24) or (r shl 16) or (g shl 8) or b
+
+    /**
+     * Gets a display color for an ElementalType, brightened for visibility on dark backgrounds.
+     */
+    fun getTypeColor(type: ElementalType): Int {
+        val hue = type.hue
+        var r = (hue shr 16) and 0xFF
+        var g = (hue shr 8) and 0xFF
+        var b = hue and 0xFF
+        // Brighten for visibility on dark background
+        r = (r * 1.15f).toInt().coerceAtMost(255)
+        g = (g * 1.15f).toInt().coerceAtMost(255)
+        b = (b * 1.15f).toInt().coerceAtMost(255)
+        return color(r, g, b, 255)
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Resize zones (shared enum)

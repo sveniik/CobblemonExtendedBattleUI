@@ -11,7 +11,8 @@
     "BattleHealthChangeHandlerMixin",
     "BattleSwitchHandlerMixin",
     "BattleInitializeHandlerMixin",
-    "MouseScrollMixin"
+    "MouseScrollMixin",
+    "BattleMoveSelectionMixin"
   ],
   "injectors": {
     "defaultRequire": 1

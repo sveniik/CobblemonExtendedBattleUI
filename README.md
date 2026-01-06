@@ -62,6 +62,8 @@ When selecting a move in battle, hover over any move to see:
 - **Move Stats** - Power, accuracy, PP remaining
 - **Move Category** - Physical, special, or status
 
+![Move Tooltip](https://cdn.modrinth.com/data/cached_images/1cfcdb1ed6c62692a3804ecf5f6247ef70202899.png)
+
 This feature can be disabled if you prefer to use [Cobblemon Move Inspector](https://modrinth.com/mod/cobblemon-move-inspector) instead.
 
 ### What this mod does NOT do

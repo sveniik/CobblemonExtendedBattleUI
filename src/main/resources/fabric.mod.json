@@ -6,8 +6,8 @@
   "description": "Customizes and enhances the Cobblemon battle UI",
   "authors": ["sveniik"],
   "contact": {
-    "homepage": "https://github.com/sveniik/CobblemonExtendedBattleUI",
-    "sources": ""
+    "homepage": "https://modrinth.com/mod/cobblemon-extended-battle-ui",
+    "sources": "https://github.com/sveniik/CobblemonExtendedBattleUI"
   },
   "license": "MIT",
   "icon": "assets/cobblemonextendedbattleui/icon.png",
@@ -24,6 +24,12 @@
         "adapter": "kotlin",
         "value": "com.cobblemonextendedbattleui.CobblemonExtendedBattleUI"
       }
+    ],
+    "modmenu": [
+      {
+        "adapter": "kotlin",
+        "value": "com.cobblemonextendedbattleui.ModMenuIntegration"
+      }
     ]
   },
   "mixins": [
@@ -37,5 +43,9 @@
     "java": ">=21",
     "fabric-language-kotlin": ">=1.12.0",
     "cobblemon": ">=1.7.0"
+  },
+  "suggests": {
+    "modmenu": "*",
+    "cloth-config": "*"
   }
 }

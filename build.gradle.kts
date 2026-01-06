@@ -20,8 +20,10 @@ repositories {
     maven("https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/")
     // Architectury
     maven("https://maven.architectury.dev/")
-    // Shedaniel (for cloth-config if needed)
+    // Shedaniel (for cloth-config)
     maven("https://maven.shedaniel.me/")
+    // TerraformersMC (for Mod Menu)
+    maven("https://maven.terraformersmc.com/")
 }
 
 dependencies {
@@ -36,6 +38,14 @@ dependencies {
 
     // Cobblemon - this is the mod we're extending
     modImplementation("com.cobblemon:fabric:${property("cobblemon_version")}")
+
+    // Optional: Mod Menu integration (config screen)
+    modCompileOnly("com.terraformersmc:modmenu:${property("modmenu_version")}")
+
+    // Optional: Cloth Config for config screen UI
+    modCompileOnly("me.shedaniel.cloth:cloth-config-fabric:${property("cloth_config_version")}") {
+        exclude(group = "net.fabricmc.fabric-api")
+    }
 }
 
 tasks.processResources {

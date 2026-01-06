@@ -296,6 +296,26 @@ object PanelConfig {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Feature toggle setters (for config screen)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    fun setEnableTeamIndicators(enabled: Boolean) {
+        enableTeamIndicators = enabled
+    }
+
+    fun setEnableBattleInfoPanel(enabled: Boolean) {
+        enableBattleInfoPanel = enabled
+    }
+
+    fun setEnableBattleLog(enabled: Boolean) {
+        enableBattleLog = enabled
+    }
+
+    fun setEnableMoveTooltips(enabled: Boolean) {
+        enableMoveTooltips = enabled
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Feature toggle helpers (for mixins to check tracking dependencies)
     // ═══════════════════════════════════════════════════════════════════════════
 

@@ -54,6 +54,16 @@ Pokemon model indicators below each team's health bars showing:
 
 ![Team Indicators](https://cdn.modrinth.com/data/cached_images/c7a572a02b91b4e6a5c5cfbd8b50d0b74a2719ac.png)
 
+### Move Tooltips
+
+When selecting a move in battle, hover over any move to see:
+
+- **Type Effectiveness** - Shows whether the move is super effective, not very effective, or has no effect against the opponent
+- **Move Stats** - Power, accuracy, PP remaining
+- **Move Category** - Physical, special, or status
+
+This feature can be disabled if you prefer to use [Cobblemon Move Inspector](https://modrinth.com/mod/cobblemon-move-inspector) instead.
+
 ### What this mod does NOT do
 
 This mod does not give you any information that you could not otherwise have obtained. Opposition team size, team members, stats, moves, etc... are not and never will be in scope for this mod. This mod is intended to only give any information that you could get via common knowledge, note taking, or reading the match log in a quick and easy way as a QOL upgrade.
@@ -81,7 +91,9 @@ Your preferences for panel/log size, position, and font sizes are saved automati
 
 ## Configuration
 
-You can disable individual features by editing the config file. This requires a game restart to take effect.
+If you have [Mod Menu](https://modrinth.com/mod/modmenu) installed, you can configure features directly in-game via the mod settings screen.
+
+Alternatively, you can edit the config file manually:
 
 **Config file location:** `.minecraft/config/cobblemonextendedbattleui.json`
 
@@ -92,14 +104,16 @@ You can disable individual features by editing the config file. This requires a 
 | `enableTeamIndicators` | `true` | Pokemon model indicators below health bars with hover tooltips |
 | `enableBattleInfoPanel` | `true` | Weather, terrain, field effects, stat changes panel |
 | `enableBattleLog` | `true` | Custom battle log with damage percentages (replaces Cobblemon's chat log) |
+| `enableMoveTooltips` | `true` | Type effectiveness tooltips when hovering over moves. Disable if using Cobblemon Move Inspector. |
 
-### Example: Disable Battle Log Only
+### Example: Disable Move Tooltips (for Cobblemon Move Inspector users)
 
 ```json
 {
   "enableTeamIndicators": true,
   "enableBattleInfoPanel": true,
-  "enableBattleLog": false
+  "enableBattleLog": true,
+  "enableMoveTooltips": false
 }
 ```
 

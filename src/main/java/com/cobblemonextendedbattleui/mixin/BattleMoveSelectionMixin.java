@@ -25,8 +25,9 @@ public class BattleMoveSelectionMixin {
 
     /**
      * Clear move tile tracking at the start of each render frame.
+     * Note: remap = true overrides class-level remap = false for this Minecraft method.
      */
-    @Inject(method = "renderWidget", at = @At("HEAD"))
+    @Inject(method = "renderWidget", at = @At("HEAD"), remap = true)
     private void onRenderWidgetHead(DrawContext context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
         if (PanelConfig.INSTANCE.getEnableMoveTooltips()) {
             MoveTooltipRenderer.INSTANCE.clear();
@@ -35,8 +36,9 @@ public class BattleMoveSelectionMixin {
 
     /**
      * After move tiles are rendered, register their bounds and render tooltip.
+     * Note: remap = true overrides class-level remap = false for this Minecraft method.
      */
-    @Inject(method = "renderWidget", at = @At("RETURN"))
+    @Inject(method = "renderWidget", at = @At("RETURN"), remap = true)
     private void onRenderWidgetReturn(DrawContext context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
         if (!PanelConfig.INSTANCE.getEnableMoveTooltips()) {
             return;

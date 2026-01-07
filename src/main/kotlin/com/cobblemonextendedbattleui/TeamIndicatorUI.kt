@@ -1470,6 +1470,7 @@ object TeamIndicatorUI {
             ?: getPokemonNameFromUuid(uuid)
             ?: trackedPokemon?.displayName
             ?: "Unknown"
+        
 
         val hpPercent = trackedPokemon?.hpPercent
             ?: battlePokemon?.let {
@@ -1580,8 +1581,8 @@ object TeamIndicatorUI {
 
         // Get types from species (name must be lowercase for registry lookup)
         val species = speciesName?.let { PokemonSpecies.getByName(it.lowercase()) }
-        val primaryType = species?.primaryType
-        val secondaryType = species?.secondaryType
+        val primaryType = battlePokemon?.form?.primaryType
+        val secondaryType = battlePokemon?.form?.secondaryType
 
         return TooltipData(
             pokemonName = name,

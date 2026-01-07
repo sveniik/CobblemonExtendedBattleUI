@@ -190,7 +190,8 @@ object TeamIndicatorUI {
         val speciesName: String?,
         val isPlayerPokemon: Boolean,
         val actualSpeed: Int? = null,
-        val abilityName: String? = null,  // For speed modifier calculation
+        val abilityName: String? = null,  // Known ability (player Pokemon or revealed)
+        val possibleAbilities: List<String>? = null,  // Possible abilities if not yet revealed (opponent)
         val primaryType: ElementalType? = null,
         val secondaryType: ElementalType? = null
     )
@@ -232,6 +233,125 @@ object TeamIndicatorUI {
     private val TOOLTIP_SPEED = color(150, 180, 220, 255)
     private val TOOLTIP_PP = color(255, 210, 80, 255)
     private val TOOLTIP_PP_LOW = color(255, 100, 80, 255)
+    private val TOOLTIP_ABILITY = color(200, 180, 255, 255)           // Purple for known ability
+    private val TOOLTIP_ABILITY_POSSIBLE = color(160, 150, 180, 255)  // Dimmer purple for possible abilities
+
+    // Ability ID -> Display Name lookup for compound words that can't be split programmatically
+    private val ABILITY_DISPLAY_NAMES = mapOf(
+        "earlybird" to "Early Bird",
+        "flashfire" to "Flash Fire",
+        "swiftswim" to "Swift Swim",
+        "chlorophyll" to "Chlorophyll",
+        "sandveil" to "Sand Veil",
+        "sandrush" to "Sand Rush",
+        "sandstream" to "Sand Stream",
+        "sandforce" to "Sand Force",
+        "slushrush" to "Slush Rush",
+        "snowcloak" to "Snow Cloak",
+        "snowwarning" to "Snow Warning",
+        "icebody" to "Ice Body",
+        "iceface" to "Ice Face",
+        "icescales" to "Ice Scales",
+        "dryskin" to "Dry Skin",
+        "waterveil" to "Water Veil",
+        "waterabsorb" to "Water Absorb",
+        "waterbubble" to "Water Bubble",
+        "raindish" to "Rain Dish",
+        "drizzle" to "Drizzle",
+        "drought" to "Drought",
+        "solarpower" to "Solar Power",
+        "moldbreaker" to "Mold Breaker",
+        "toughclaws" to "Tough Claws",
+        "strongjaw" to "Strong Jaw",
+        "hugepower" to "Huge Power",
+        "purepower" to "Pure Power",
+        "hustle" to "Hustle",
+        "guts" to "Guts",
+        "sheerforce" to "Sheer Force",
+        "ironfist" to "Iron Fist",
+        "technician" to "Technician",
+        "skilllink" to "Skill Link",
+        "serenegrace" to "Serene Grace",
+        "superluck" to "Super Luck",
+        "sniper" to "Sniper",
+        "infiltrator" to "Infiltrator",
+        "scrappy" to "Scrappy",
+        "noguard" to "No Guard",
+        "compoundeyes" to "Compound Eyes",
+        "keeneye" to "Keen Eye",
+        "wonderguard" to "Wonder Guard",
+        "multiscale" to "Multiscale",
+        "solidrock" to "Solid Rock",
+        "filter" to "Filter",
+        "thickfat" to "Thick Fat",
+        "furcoat" to "Fur Coat",
+        "fluffy" to "Fluffy",
+        "battlearmor" to "Battle Armor",
+        "shellarmor" to "Shell Armor",
+        "magicguard" to "Magic Guard",
+        "magicbounce" to "Magic Bounce",
+        "naturalcure" to "Natural Cure",
+        "regenerator" to "Regenerator",
+        "poisonheal" to "Poison Heal",
+        "immunity" to "Immunity",
+        "limber" to "Limber",
+        "owntempo" to "Own Tempo",
+        "innerfocus" to "Inner Focus",
+        "steadfast" to "Steadfast",
+        "contrary" to "Contrary",
+        "defiant" to "Defiant",
+        "competitive" to "Competitive",
+        "speedboost" to "Speed Boost",
+        "moxie" to "Moxie",
+        "beastboost" to "Beast Boost",
+        "intimidate" to "Intimidate",
+        "pressure" to "Pressure",
+        "unnerve" to "Unnerve",
+        "unaware" to "Unaware",
+        "oblivious" to "Oblivious",
+        "trace" to "Trace",
+        "imposter" to "Imposter",
+        "prankster" to "Prankster",
+        "protean" to "Protean",
+        "libero" to "Libero",
+        "levitate" to "Levitate",
+        "sturdy" to "Sturdy",
+        "anticipation" to "Anticipation",
+        "forewarn" to "Forewarn",
+        "frisk" to "Frisk",
+        "pickup" to "Pickup",
+        "harvest" to "Harvest",
+        "runaway" to "Run Away",
+        "quickfeet" to "Quick Feet",
+        "unburden" to "Unburden",
+        "shadowtag" to "Shadow Tag",
+        "arenatrap" to "Arena Trap",
+        "magnetpull" to "Magnet Pull",
+        "stickyhold" to "Sticky Hold",
+        "suctioncups" to "Suction Cups"
+    )
+
+    /**
+     * Format an ability ID into a proper display name.
+     * Uses lookup table for compound words, falls back to formatting for unknown abilities.
+     */
+    private fun formatAbilityName(abilityId: String): String {
+        // Check lookup first
+        ABILITY_DISPLAY_NAMES[abilityId.lowercase()]?.let { return it }
+
+        // Fallback: handle underscore/camelCase separation
+        return abilityId
+            .replace("_", " ")
+            .split(Regex("(?=[A-Z])|\\s+"))
+            .filter { it.isNotBlank() }
+            .joinToString(" ") { word ->
+                when (word.lowercase()) {
+                    "hp" -> "HP"
+                    "pp" -> "PP"
+                    else -> word.replaceFirstChar { it.uppercase() }
+                }
+            }
+    }
 
     // ================== Stat Calculation Utilities ==================
 
@@ -1375,6 +1495,7 @@ object TeamIndicatorUI {
         val item: BattleStateTracker.TrackedItem?
         val actualSpeed: Int?
         val abilityName: String?
+        val possibleAbilities: List<String>?
 
         if (isPlayerPokemon && battlePokemon != null) {
             // Use tracked PP (which updates when moves are used) - initialized in render()
@@ -1403,7 +1524,15 @@ object TeamIndicatorUI {
             }
             // Get actual speed stat and ability for player's Pokemon
             actualSpeed = battlePokemon.speed
-            abilityName = battlePokemon.ability.name
+            // Format the ability name properly (ability.name returns ID like "flashfire")
+            val rawAbilityName = battlePokemon.ability.name
+            val translatedAbility = Text.translatable("cobblemon.ability.$rawAbilityName").string
+            abilityName = if (translatedAbility.startsWith("cobblemon.") || translatedAbility == rawAbilityName) {
+                formatAbilityName(rawAbilityName)
+            } else {
+                translatedAbility
+            }
+            possibleAbilities = null  // Player knows their own ability
         } else {
             // Opponent/spectated: show revealed moves with estimated PP (assumes PP Max)
             moves = BattleStateTracker.getRevealedMoves(uuid).map { moveName ->
@@ -1423,7 +1552,30 @@ object TeamIndicatorUI {
             }
             item = BattleStateTracker.getItem(uuid)
             actualSpeed = null  // Can't know opponent's actual speed
-            abilityName = null  // Don't know opponent's ability
+
+            // Check if ability was revealed during battle
+            val revealedAbility = BattleStateTracker.getRevealedAbility(uuid)
+            if (revealedAbility != null) {
+                abilityName = revealedAbility
+                possibleAbilities = null  // Ability is known, no need for possibilities
+            } else {
+                // Ability not yet revealed - show possible abilities from species
+                abilityName = null
+                possibleAbilities = speciesName?.let { name ->
+                    PokemonSpecies.getByName(name.lowercase())?.abilities?.mapNotNull { potentialAbility ->
+                        // Try translation first, fall back to formatting the ID
+                        val translated = Text.translatable(potentialAbility.template.displayName).string
+                        val abilityId = potentialAbility.template.name
+
+                        // If translation failed (returned key or looks like untranslated ID), format manually
+                        if (translated.startsWith("cobblemon.") || translated == abilityId) {
+                            formatAbilityName(abilityId)
+                        } else {
+                            translated
+                        }
+                    }?.distinct()
+                }
+            }
         }
 
         // Get types from species (name must be lowercase for registry lookup)
@@ -1445,6 +1597,7 @@ object TeamIndicatorUI {
             isPlayerPokemon = isPlayerPokemon,
             actualSpeed = actualSpeed,
             abilityName = abilityName,
+            possibleAbilities = possibleAbilities,
             primaryType = primaryType,
             secondaryType = secondaryType
         )
@@ -1475,6 +1628,23 @@ object TeamIndicatorUI {
                 typeSegments.add(data.secondaryType.displayName.string to UIUtils.getTypeColor(data.secondaryType))
             }
             lines.add(typeSegments)
+        }
+
+        // Ability
+        if (data.abilityName != null) {
+            // Known ability (player Pokemon or revealed opponent ability)
+            lines.add(listOf("Ability: ${data.abilityName}" to TOOLTIP_ABILITY))
+        } else if (!data.possibleAbilities.isNullOrEmpty()) {
+            // Unknown ability - show possible abilities
+            val abilitySegments = mutableListOf<Pair<String, Int>>()
+            abilitySegments.add("Ability: " to TOOLTIP_LABEL)
+            data.possibleAbilities.forEachIndexed { index, ability ->
+                if (index > 0) {
+                    abilitySegments.add(" / " to TOOLTIP_DIM)
+                }
+                abilitySegments.add(ability to TOOLTIP_ABILITY_POSSIBLE)
+            }
+            lines.add(abilitySegments)
         }
 
         // HP percentage

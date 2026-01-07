@@ -67,6 +67,42 @@ object BattleMessageInterceptor {
     private const val PRESSURE_KEY = "cobblemon.battle.ability.pressure"
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Ability Reveal Keys (for tracking opponent abilities)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Generic ability activation: "%1$s's %2$s activated!" - args: [pokemonName, abilityName]
+    private const val ABILITY_GENERIC_KEY = "cobblemon.battle.ability.generic"
+
+    // Specific abilities with unique messages (ability name derived from key)
+    // Format: [pokemonName] only - ability name is in the key
+    private val ABILITY_SINGLE_ARG_KEYS = mapOf(
+        "cobblemon.battle.ability.sturdy" to "Sturdy",           // "%1$s endured the hit!"
+        "cobblemon.battle.ability.unnerve" to "Unnerve",         // "%1$s made the opponent too nervous to eat berries!"
+        "cobblemon.battle.ability.anticipation" to "Anticipation", // "%1$s shuddered in anticipation!"
+        "cobblemon.battle.ability.intimidate" to "Intimidate"    // "%1$s's Intimidate activated!"
+    )
+
+    // Trace: "%1$s traced the opposing %2$s's %3$s!" - args: [tracer, target, abilityName]
+    private const val ABILITY_TRACE_KEY = "cobblemon.battle.ability.trace"
+
+    // Receiver/Power of Alchemy: "%1$s's %2$s was taken over!" - args: [pokemon, abilityName]
+    private const val ABILITY_RECEIVER_KEY = "cobblemon.battle.ability.receiver"
+
+    // Ability replaced (Worry Seed, Entrainment, etc.): "%1$s's ability became %2$s!" - args: [pokemon, newAbility]
+    private const val ABILITY_REPLACE_KEY = "cobblemon.battle.ability.replace"
+
+    // Magic Bounce: "%1$s bounced the %2$s back!" - args: [pokemon, moveName]
+    private const val ABILITY_MAGICBOUNCE_KEY = "cobblemon.battle.ability.magicbounce"
+
+    // Ability-revealing "start" messages (ability name in key, not in args)
+    // These are abilities that activate via "start" messages rather than "ability" messages
+    // Format: [pokemonName] - ability name derived from key suffix
+    private val ABILITY_START_KEYS = mapOf(
+        "cobblemon.battle.start.flashfire" to "Flash Fire"   // "The power of %1$s's fire type moves rose!"
+        // Add more as discovered - some abilities use start.* messages
+    )
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Item Tracking Keys
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -403,7 +439,72 @@ object BattleMessageInterceptor {
             if (key == PRESSURE_KEY && args.isNotEmpty()) {
                 val pokemonName = argToString(args[0])
                 BattleStateTracker.registerPressure(pokemonName)
+                BattleStateTracker.setRevealedAbility(pokemonName, "Pressure")
                 CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Pressure registered for $pokemonName")
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // ═══════════════════════════════════════════════════════════════════════════
+            // Ability Reveal Message Handling
+            // ═══════════════════════════════════════════════════════════════════════════
+
+            // Generic ability activation: "%1$s's %2$s activated!" - args: [pokemonName, abilityName]
+            if (key == ABILITY_GENERIC_KEY && args.size >= 2) {
+                val pokemonName = argToString(args[0])
+                val abilityName = argToString(args[1])
+                BattleStateTracker.setRevealedAbility(pokemonName, abilityName)
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Specific abilities with unique messages (single arg - ability from key)
+            ABILITY_SINGLE_ARG_KEYS[key]?.let { abilityName ->
+                if (args.isNotEmpty()) {
+                    val pokemonName = argToString(args[0])
+                    BattleStateTracker.setRevealedAbility(pokemonName, abilityName)
+                }
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Trace: "%1$s traced the opposing %2$s's %3$s!" - args: [tracer, target, abilityName]
+            // This reveals BOTH the tracer's Trace ability AND the target's copied ability
+            if (key == ABILITY_TRACE_KEY && args.size >= 3) {
+                val tracerName = argToString(args[0])
+                val targetName = argToString(args[1])
+                val copiedAbility = argToString(args[2])
+                BattleStateTracker.setRevealedAbility(tracerName, "Trace")
+                BattleStateTracker.setRevealedAbility(targetName, copiedAbility)
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Receiver/Power of Alchemy: "%1$s's %2$s was taken over!" - args: [pokemon, abilityName]
+            if (key == ABILITY_RECEIVER_KEY && args.size >= 2) {
+                val pokemonName = argToString(args[0])
+                val abilityName = argToString(args[1])
+                BattleStateTracker.setRevealedAbility(pokemonName, abilityName)
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Ability replaced (Worry Seed, etc.): "%1$s's ability became %2$s!" - args: [pokemon, newAbility]
+            if (key == ABILITY_REPLACE_KEY && args.size >= 2) {
+                val pokemonName = argToString(args[0])
+                val newAbility = argToString(args[1])
+                BattleStateTracker.setRevealedAbility(pokemonName, newAbility)
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Magic Bounce: "%1$s bounced the %2$s back!" - args: [pokemon, moveName]
+            if (key == ABILITY_MAGICBOUNCE_KEY && args.isNotEmpty()) {
+                val pokemonName = argToString(args[0])
+                BattleStateTracker.setRevealedAbility(pokemonName, "Magic Bounce")
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Ability-revealing "start" messages (Flash Fire, etc.)
+            ABILITY_START_KEYS[key]?.let { abilityName ->
+                if (args.isNotEmpty()) {
+                    val pokemonName = argToString(args[0])
+                    BattleStateTracker.setRevealedAbility(pokemonName, abilityName)
+                }
                 // Don't return - let it continue to be processed by BattleLog
             }
 

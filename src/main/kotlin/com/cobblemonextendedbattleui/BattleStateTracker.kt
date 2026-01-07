@@ -194,6 +194,13 @@ object BattleStateTracker {
     private val pressurePokemon = ConcurrentHashMap.newKeySet<UUID>()
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Ability Tracking (for opponent Pokemon)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Maps UUID -> revealed ability name (persists entire battle)
+    private val revealedAbilities = ConcurrentHashMap<UUID, String>()
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // PP Tracking (for player's Pokemon)
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -336,6 +343,7 @@ object BattleStateTracker {
         moveUsageCounts.clear()
         trackedMoves.clear()
         pressurePokemon.clear()
+        revealedAbilities.clear()
         BattleMessageInterceptor.clearMoveTracking()
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared all state")
     }
@@ -1031,6 +1039,40 @@ object BattleStateTracker {
         return moveUsageCounts[uuid]?.get(moveName) ?: 0
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Ability Tracking API
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Set the revealed ability for a Pokemon.
+     * Called when an ability activates in battle (e.g., Intimidate, Flash Fire, etc.).
+     */
+    fun setRevealedAbility(pokemonName: String, abilityName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for ability tracking")
+            return
+        }
+
+        // Normalize ability name (capitalize each word)
+        val normalizedName = abilityName.split(" ", "_", "-")
+            .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
+
+        revealedAbilities[uuid] = normalizedName
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName ability revealed: $normalizedName")
+    }
+
+    /**
+     * Get the revealed ability for a Pokemon, or null if not yet revealed.
+     */
+    fun getRevealedAbility(uuid: UUID): String? = revealedAbilities[uuid]
+
+    /**
+     * Get the revealed ability for a Pokemon by name.
+     */
+    fun getRevealedAbilityByName(pokemonName: String, preferAlly: Boolean? = null): String? {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return null
+        return revealedAbilities[uuid]
+    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Spectral Thief Handling

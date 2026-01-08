@@ -1978,20 +1978,6 @@ object TeamIndicatorUI {
             val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
             lines.add(listOf("Attack: $effectiveAttack$modText" to TOOLTIP_ATTACK))
         }
-        // Special Attack
-        if (data.isPlayerPokemon && data.actualSpecialAttack != null) {
-            val specialAttackStage = data.statChanges[BattleStateTracker.BattleStat.SPECIAL_ATTACK] ?: 0
-            val effectiveSpecialAttack = calculateEffectiveStat(
-                data.actualSpecialAttack,
-                specialAttackStage,
-                BattleStateTracker.BattleStat.SPECIAL_ATTACK,
-                data.nature
-            )
-            val modifiers = mutableListOf<String>()
-            if (specialAttackStage != 0) modifiers.add(if (specialAttackStage > 0) "+$specialAttackStage" else "$specialAttackStage")
-            val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
-            lines.add(listOf("Special Attack: $effectiveSpecialAttack$modText" to TOOLTIP_SPECIAL_ATTACK))
-        }
 
         // Defense
         val defenceStage = data.statChanges[BattleStateTracker.BattleStat.DEFENSE] ?: 0
@@ -2034,6 +2020,23 @@ object TeamIndicatorUI {
                 )
             )
         }
+
+        // Special Attack
+        if (data.isPlayerPokemon && data.actualSpecialAttack != null) {
+            val specialAttackStage = data.statChanges[BattleStateTracker.BattleStat.SPECIAL_ATTACK] ?: 0
+            val effectiveSpecialAttack = calculateEffectiveStat(
+                data.actualSpecialAttack,
+                specialAttackStage,
+                BattleStateTracker.BattleStat.SPECIAL_ATTACK,
+                data.nature
+            )
+            val modifiers = mutableListOf<String>()
+            if (specialAttackStage != 0) modifiers.add(if (specialAttackStage > 0) "+$specialAttackStage" else "$specialAttackStage")
+            val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
+            lines.add(listOf("Special Attack: $effectiveSpecialAttack$modText" to TOOLTIP_SPECIAL_ATTACK))
+        }
+
+
 
         // Special Defense
         val specialDefenceStage = data.statChanges[BattleStateTracker.BattleStat.SPECIAL_DEFENSE] ?: 0

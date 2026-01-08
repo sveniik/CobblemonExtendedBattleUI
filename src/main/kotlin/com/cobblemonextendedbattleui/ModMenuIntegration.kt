@@ -37,6 +37,18 @@ class ModMenuIntegration : ModMenuApi {
                 .build()
         )
 
+        // Team Indicator Repositioning toggle
+        general.addEntry(
+            entryBuilder.startBooleanToggle(
+                Text.translatable("cobblemonextendedbattleui.config.teamIndicatorRepositioning"),
+                PanelConfig.teamIndicatorRepositioningEnabled
+            )
+                .setDefaultValue(true)
+                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.teamIndicatorRepositioning.tooltip"))
+                .setSaveConsumer { value -> PanelConfig.setTeamIndicatorRepositioningEnabled(value) }
+                .build()
+        )
+
         // Battle Info Panel toggle
         general.addEntry(
             entryBuilder.startBooleanToggle(

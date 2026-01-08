@@ -9,7 +9,10 @@
   "cobblemonextendedbattleui.config.category.tooltipOptions": "Tooltip Options",
 
   "cobblemonextendedbattleui.config.enableTeamIndicators": "Team Indicators",
-  "cobblemonextendedbattleui.config.enableTeamIndicators.tooltip": "Show Pokeball team indicators under health bars during battle",
+  "cobblemonextendedbattleui.config.enableTeamIndicators.tooltip": "Show Pokemon team indicators under health bars during battle",
+
+  "cobblemonextendedbattleui.config.teamIndicatorRepositioning": "Team Indicator Repositioning",
+  "cobblemonextendedbattleui.config.teamIndicatorRepositioning.tooltip": "Allow dragging team indicators to reposition them. When disabled, indicators stay in their default positions.",
 
   "cobblemonextendedbattleui.config.enableBattleInfoPanel": "Battle Info Panel",
   "cobblemonextendedbattleui.config.enableBattleInfoPanel.tooltip": "Show panel with weather, terrain, field conditions, and stat stages",

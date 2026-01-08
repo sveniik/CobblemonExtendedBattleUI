@@ -53,10 +53,14 @@ object TeamIndicatorUI {
     private const val TILE_HEIGHT = 40
     private const val COMPACT_TILE_HEIGHT = 28
 
-    // Pokemon model indicator settings
-    private const val MODEL_SIZE = 24      // Compact size for indicators
-    private const val MODEL_SPACING = 3    // Tight spacing between models
-    private const val MODEL_OFFSET_Y = 10  // Gap below the last tile (moves panel down)
+    // Pokemon model indicator settings (base values before scaling)
+    private const val BASE_MODEL_SIZE = 24      // Compact size for indicators
+    private const val BASE_MODEL_SPACING = 3    // Tight spacing between models
+    private const val MODEL_OFFSET_Y = 10       // Gap below the last tile (moves panel down)
+
+    // Computed values based on current scale
+    private val modelSize: Int get() = (BASE_MODEL_SIZE * PanelConfig.teamIndicatorScale).toInt()
+    private val modelSpacing: Int get() = (BASE_MODEL_SPACING * PanelConfig.teamIndicatorScale).toInt()
 
     // Background panel settings
     private const val PANEL_PADDING_V = 2  // Vertical padding (top/bottom)
@@ -224,9 +228,33 @@ object TeamIndicatorUI {
     private var leftTeamPanelBounds: TooltipBoundsData? = null
     private var rightTeamPanelBounds: TooltipBoundsData? = null
 
+    // Help icon bounds (small "?" in corner of each panel)
+    private var leftHelpIconBounds: TooltipBoundsData? = null
+    private var rightHelpIconBounds: TooltipBoundsData? = null
+
     // Key state tracking for font size adjustment
     private var wasIncreaseFontKeyPressed = false
     private var wasDecreaseFontKeyPressed = false
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Drag and Click State Tracking
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Drag state
+    private var isDragging = false
+    private var draggingLeftSide = true  // Which side we're dragging
+    private var dragStartMouseX = 0
+    private var dragStartMouseY = 0
+    private var dragStartPanelX = 0
+    private var dragStartPanelY = 0
+
+    // Click/double-click detection
+    private var lastClickTime = 0L
+    private var lastClickSide: Boolean? = null  // Which side was clicked
+    private const val DOUBLE_CLICK_THRESHOLD_MS = 400L
+
+    // Mouse button state tracking
+    private var wasMouseButtonDown = false
 
     // Tooltip colors
     private val TOOLTIP_BG = color(22, 27, 34, 245)
@@ -878,16 +906,34 @@ object TeamIndicatorUI {
         val playerOnLeft = playerActor != null && leftSide.actors.any { it.uuid == playerUUID }
         val playerOnRight = playerActor != null && rightSide.actors.any { it.uuid == playerUUID }
 
+        // Get team sizes for position calculations
+        val leftTeamSize = if (playerOnLeft) playerActor!!.pokemon.size else trackedSide1Pokemon.size
+        val rightTeamSize = if (playerOnRight) playerActor!!.pokemon.size else trackedSide2Pokemon.size
+
+        // Calculate positions for left and right teams
+        val (leftX, leftFinalY) = getTeamPosition(
+            isLeftSide = true,
+            teamSize = leftTeamSize,
+            defaultY = leftY,
+            screenWidth = screenWidth
+        )
+        val (rightX, rightFinalY) = getTeamPosition(
+            isLeftSide = false,
+            teamSize = rightTeamSize,
+            defaultY = rightY,
+            screenWidth = screenWidth
+        )
+
         // Render LEFT side - player's team if they're on left, otherwise tracked
         if (playerOnLeft) {
             // Player is on left - use battle actor's pokemon list for authoritative data
             val playerTeam = playerActor!!.pokemon
-            renderBattleTeam(context, HORIZONTAL_INSET, leftY, playerTeam, isLeftSide = true)
+            renderBattleTeam(context, leftX, leftFinalY, playerTeam, isLeftSide = true)
         } else {
             // Left side is opponent or we're spectating - use tracked Pokemon from battle data
             val leftTeam = trackedSide1Pokemon.values.toList()
             if (leftTeam.isNotEmpty()) {
-                renderTrackedTeam(context, HORIZONTAL_INSET, leftY, leftTeam, isLeftSide = true)
+                renderTrackedTeam(context, leftX, leftFinalY, leftTeam, isLeftSide = true)
             }
         }
 
@@ -895,37 +941,51 @@ object TeamIndicatorUI {
         if (playerOnRight) {
             // Player is on right - use battle actor's pokemon list for authoritative data
             val playerTeam = playerActor!!.pokemon
-            val rightWidth = playerTeam.size * (MODEL_SIZE + MODEL_SPACING) - MODEL_SPACING
-            renderBattleTeam(
-                context,
-                screenWidth - HORIZONTAL_INSET - rightWidth,
-                rightY,
-                playerTeam,
-                isLeftSide = false
-            )
+            renderBattleTeam(context, rightX, rightFinalY, playerTeam, isLeftSide = false)
         } else {
             // Right side is opponent or we're spectating - use tracked Pokemon from battle data
             val rightTeam = trackedSide2Pokemon.values.toList()
             if (rightTeam.isNotEmpty()) {
-                val rightWidth = rightTeam.size * (MODEL_SIZE + MODEL_SPACING) - MODEL_SPACING
-                renderTrackedTeam(
-                    context,
-                    screenWidth - HORIZONTAL_INSET - rightWidth,
-                    rightY,
-                    rightTeam,
-                    isLeftSide = false
-                )
+                renderTrackedTeam(context, rightX, rightFinalY, rightTeam, isLeftSide = false)
             }
         }
 
-        // Detect hovered pokeball
-        hoveredPokeball = pokeballBounds.find { bounds ->
-            mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
-                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height
+        // Check if mouse is over a help icon first (takes precedence over Pokemon hover)
+        val overHelpIcon = isMouseOverHelpIcon(mouseX, mouseY)
+
+        // Detect hovered pokeball (but not if over help icon)
+        hoveredPokeball = if (overHelpIcon) {
+            null
+        } else {
+            pokeballBounds.find { bounds ->
+                mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
+                    mouseY >= bounds.y && mouseY <= bounds.y + bounds.height
+            }
         }
 
-        // Handle input when hovering over team panels (even if tooltip not visible)
-        handleInput(mc)
+        // Handle all input (dragging, clicking, font scaling)
+        handleInput(mc, mouseX, mouseY)
+    }
+
+    /**
+     * Check if mouse coordinates are over any help icon.
+     */
+    private fun isMouseOverHelpIcon(mouseX: Int, mouseY: Int): Boolean {
+        leftHelpIconBounds?.let { bounds ->
+            if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
+                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height
+            ) {
+                return true
+            }
+        }
+        rightHelpIconBounds?.let { bounds ->
+            if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
+                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height
+            ) {
+                return true
+            }
+        }
+        return false
     }
 
     /**
@@ -962,13 +1022,110 @@ object TeamIndicatorUI {
     }
 
     /**
-     * Handle input for font keybinds when we have priority.
+     * Handle all input: dragging, clicking, font keybinds.
      */
-    private fun handleInput(mc: MinecraftClient) {
-        if (!shouldHandleFontInput()) return
-
+    private fun handleInput(mc: MinecraftClient, mouseX: Int, mouseY: Int) {
         val handle = mc.window.handle
-        handleFontKeybinds(handle)
+        val isMouseDown = GLFW.glfwGetMouseButton(handle, GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS
+        val isShiftDown = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS ||
+            GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS
+
+        val repositioningEnabled = PanelConfig.teamIndicatorRepositioningEnabled
+
+        // Handle drag in progress (only if repositioning is enabled)
+        if (isDragging && repositioningEnabled) {
+            if (isMouseDown) {
+                // Continue dragging - allow positioning to screen edges
+                val deltaX = mouseX - dragStartMouseX
+                val deltaY = mouseY - dragStartMouseY
+                val newX = (dragStartPanelX + deltaX).coerceIn(0, mc.window.scaledWidth - modelSize)
+                val newY = (dragStartPanelY + deltaY).coerceIn(0, mc.window.scaledHeight - modelSize)
+
+                if (draggingLeftSide) {
+                    PanelConfig.setTeamIndicatorLeftPosition(newX, newY)
+                } else {
+                    PanelConfig.setTeamIndicatorRightPosition(newX, newY)
+                }
+            } else {
+                // Mouse released - end drag
+                isDragging = false
+                PanelConfig.save()
+            }
+            wasMouseButtonDown = isMouseDown
+            return  // Don't process other input while dragging
+        } else if (isDragging && !repositioningEnabled) {
+            // Repositioning was disabled mid-drag, cancel it
+            isDragging = false
+        }
+
+        // Check if mouse is over either panel
+        val overLeftPanel = leftTeamPanelBounds?.let { bounds ->
+            mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
+                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height
+        } ?: false
+
+        val overRightPanel = rightTeamPanelBounds?.let { bounds ->
+            mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
+                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height
+        } ?: false
+
+        val overAnyPanel = overLeftPanel || overRightPanel
+        val hoveredSide = when {
+            overLeftPanel -> true
+            overRightPanel -> false
+            else -> null
+        }
+
+        // Handle mouse button press (start drag, toggle orientation, or double-click reset)
+        if (isMouseDown && !wasMouseButtonDown && overAnyPanel && hoveredSide != null) {
+            val currentTime = System.currentTimeMillis()
+
+            if (isShiftDown) {
+                // Shift+Click: Toggle orientation
+                PanelConfig.toggleTeamIndicatorOrientation()
+                PanelConfig.save()
+            } else {
+                // Check for double-click
+                val isDoubleClick = (currentTime - lastClickTime) < DOUBLE_CLICK_THRESHOLD_MS &&
+                    lastClickSide == hoveredSide
+
+                if (isDoubleClick) {
+                    // Double-click: Reset position for this side
+                    if (hoveredSide) {
+                        PanelConfig.resetTeamIndicatorLeftPosition()
+                    } else {
+                        PanelConfig.resetTeamIndicatorRightPosition()
+                    }
+                    PanelConfig.save()
+
+                    // Reset click tracking
+                    lastClickTime = 0
+                    lastClickSide = null
+                } else if (repositioningEnabled) {
+                    // Single click - start drag (only if repositioning is enabled)
+                    isDragging = true
+                    draggingLeftSide = hoveredSide
+                    dragStartMouseX = mouseX
+                    dragStartMouseY = mouseY
+
+                    // Get current panel position as drag start
+                    val bounds = if (hoveredSide) leftTeamPanelBounds else rightTeamPanelBounds
+                    dragStartPanelX = bounds?.x?.plus(PANEL_PADDING_H) ?: mouseX
+                    dragStartPanelY = bounds?.y?.plus(PANEL_PADDING_V) ?: mouseY
+
+                    // Record click for double-click detection
+                    lastClickTime = currentTime
+                    lastClickSide = hoveredSide
+                }
+            }
+        }
+
+        wasMouseButtonDown = isMouseDown
+
+        // Handle font keybinds when hovering
+        if (shouldHandleFontInput()) {
+            handleFontKeybinds(handle)
+        }
     }
 
     /**
@@ -1049,6 +1206,44 @@ object TeamIndicatorUI {
         val bottomOfTiles = VERTICAL_INSET + (activeCount - 1) * effectiveSpacing + tileHeight
 
         return bottomOfTiles + MODEL_OFFSET_Y
+    }
+
+    /**
+     * Get the position for a team indicator panel.
+     * Returns custom position if set, otherwise calculates default based on orientation.
+     */
+    private fun getTeamPosition(
+        isLeftSide: Boolean,
+        teamSize: Int,
+        defaultY: Int,
+        screenWidth: Int
+    ): Pair<Int, Int> {
+        // Check for custom position first
+        val customX = if (isLeftSide) PanelConfig.teamIndicatorLeftX else PanelConfig.teamIndicatorRightX
+        val customY = if (isLeftSide) PanelConfig.teamIndicatorLeftY else PanelConfig.teamIndicatorRightY
+
+        if (customX != null && customY != null) {
+            return Pair(customX, customY)
+        }
+
+        // Calculate default position based on orientation
+        val isVertical = PanelConfig.teamIndicatorOrientation == PanelConfig.TeamIndicatorOrientation.VERTICAL
+
+        val defaultX = if (isLeftSide) {
+            HORIZONTAL_INSET
+        } else {
+            // Right side: align to right edge
+            if (isVertical) {
+                // For vertical, panel is narrow (single column)
+                screenWidth - HORIZONTAL_INSET - modelSize
+            } else {
+                // For horizontal, calculate full width
+                val teamWidth = teamSize * modelSize + (teamSize - 1) * modelSpacing
+                screenWidth - HORIZONTAL_INSET - teamWidth
+            }
+        }
+
+        return Pair(customX ?: defaultX, customY ?: defaultY)
     }
 
     /**
@@ -1137,14 +1332,35 @@ object TeamIndicatorUI {
     // Ditto species identifier for transform reversion
     private val DITTO_SPECIES_ID = Identifier.of("cobblemon", "ditto")
 
+    // Help icon settings
+    private const val HELP_ICON_SIZE = 8
+    private const val HELP_ICON_MARGIN = 2
+
+    /**
+     * Calculate panel dimensions based on team size and current orientation/scale.
+     */
+    private fun calculatePanelDimensions(teamSize: Int): Pair<Int, Int> {
+        if (teamSize <= 0) return Pair(0, 0)
+
+        val isVertical = PanelConfig.teamIndicatorOrientation == PanelConfig.TeamIndicatorOrientation.VERTICAL
+        return if (isVertical) {
+            val panelWidth = modelSize + PANEL_PADDING_H * 2
+            val panelHeight = teamSize * modelSize + (teamSize - 1) * modelSpacing + PANEL_PADDING_V * 2
+            Pair(panelWidth, panelHeight)
+        } else {
+            val panelWidth = teamSize * modelSize + (teamSize - 1) * modelSpacing + PANEL_PADDING_H * 2
+            val panelHeight = modelSize + PANEL_PADDING_V * 2
+            Pair(panelWidth, panelHeight)
+        }
+    }
+
     /**
      * Draw a background panel behind the team's Pokemon models.
      */
     private fun drawTeamPanel(context: DrawContext, x: Int, y: Int, teamSize: Int) {
         if (teamSize <= 0) return
 
-        val panelWidth = teamSize * MODEL_SIZE + (teamSize - 1) * MODEL_SPACING + PANEL_PADDING_H * 2
-        val panelHeight = MODEL_SIZE + PANEL_PADDING_V * 2
+        val (panelWidth, panelHeight) = calculatePanelDimensions(teamSize)
 
         val panelX = x - PANEL_PADDING_H
         val panelY = y - PANEL_PADDING_V
@@ -1254,8 +1470,7 @@ object TeamIndicatorUI {
     private fun drawPanelCornerOverlays(context: DrawContext, x: Int, y: Int, teamSize: Int) {
         if (teamSize <= 0) return
 
-        val panelWidth = teamSize * MODEL_SIZE + (teamSize - 1) * MODEL_SPACING + PANEL_PADDING_H * 2
-        val panelHeight = MODEL_SIZE + PANEL_PADDING_V * 2
+        val (panelWidth, panelHeight) = calculatePanelDimensions(teamSize)
 
         val panelX = x - PANEL_PADDING_H
         val panelY = y - PANEL_PADDING_V
@@ -1308,6 +1523,96 @@ object TeamIndicatorUI {
     }
 
     /**
+     * Draw a small help icon ("?") in the corner of the panel.
+     * Returns the bounds of the icon for hover detection.
+     */
+    private fun drawHelpIcon(
+        context: DrawContext,
+        panelX: Int,
+        panelY: Int,
+        panelWidth: Int,
+        panelHeight: Int,
+        isLeftSide: Boolean
+    ): TooltipBoundsData {
+        val mc = MinecraftClient.getInstance()
+        val mouseX = (mc.mouse.x * mc.window.scaledWidth / mc.window.width).toInt()
+        val mouseY = (mc.mouse.y * mc.window.scaledHeight / mc.window.height).toInt()
+
+        // Position in bottom-right corner for left panel, bottom-left for right panel
+        val iconX = if (isLeftSide) {
+            panelX + panelWidth - HELP_ICON_SIZE - HELP_ICON_MARGIN
+        } else {
+            panelX + HELP_ICON_MARGIN
+        }
+        val iconY = panelY + panelHeight - HELP_ICON_SIZE - HELP_ICON_MARGIN
+
+        val bounds = TooltipBoundsData(iconX, iconY, HELP_ICON_SIZE, HELP_ICON_SIZE)
+
+        // Check if hovered
+        val isHovered = mouseX >= iconX && mouseX <= iconX + HELP_ICON_SIZE &&
+            mouseY >= iconY && mouseY <= iconY + HELP_ICON_SIZE
+
+        // Colors - more visible when hovered
+        val bgColor = if (isHovered) color(70, 85, 105, 230) else color(45, 55, 70, 180)
+        val borderColor = if (isHovered) color(100, 120, 150, 255) else color(70, 80, 100, 200)
+        val textColor = if (isHovered) color(240, 245, 250, 255) else color(140, 155, 175, 220)
+
+        val matrices = context.matrices
+        matrices.push()
+        matrices.translate(0.0, 0.0, 250.0)  // Above panel, below tooltips
+
+        // Draw circular background (8x8 pixel circle approximation)
+        // Center rows (full width)
+        val bg = applyOpacity(bgColor)
+        context.fill(iconX, iconY + 2, iconX + HELP_ICON_SIZE, iconY + 6, bg)
+        // Top/bottom rows (narrower for rounded look)
+        context.fill(iconX + 1, iconY + 1, iconX + HELP_ICON_SIZE - 1, iconY + 2, bg)
+        context.fill(iconX + 1, iconY + 6, iconX + HELP_ICON_SIZE - 1, iconY + 7, bg)
+        context.fill(iconX + 2, iconY, iconX + HELP_ICON_SIZE - 2, iconY + 1, bg)
+        context.fill(iconX + 2, iconY + 7, iconX + HELP_ICON_SIZE - 2, iconY + 8, bg)
+
+        // Draw circular border for definition
+        val border = applyOpacity(borderColor)
+        // Top edge
+        context.fill(iconX + 2, iconY, iconX + HELP_ICON_SIZE - 2, iconY + 1, border)
+        // Bottom edge
+        context.fill(iconX + 2, iconY + HELP_ICON_SIZE - 1, iconX + HELP_ICON_SIZE - 2, iconY + HELP_ICON_SIZE, border)
+        // Left edge
+        context.fill(iconX, iconY + 2, iconX + 1, iconY + HELP_ICON_SIZE - 2, border)
+        // Right edge
+        context.fill(iconX + HELP_ICON_SIZE - 1, iconY + 2, iconX + HELP_ICON_SIZE, iconY + HELP_ICON_SIZE - 2, border)
+        // Corner pixels for smooth curve
+        context.fill(iconX + 1, iconY + 1, iconX + 2, iconY + 2, border)
+        context.fill(iconX + HELP_ICON_SIZE - 2, iconY + 1, iconX + HELP_ICON_SIZE - 1, iconY + 2, border)
+        context.fill(iconX + 1, iconY + HELP_ICON_SIZE - 2, iconX + 2, iconY + HELP_ICON_SIZE - 1, border)
+        context.fill(iconX + HELP_ICON_SIZE - 2, iconY + HELP_ICON_SIZE - 2, iconX + HELP_ICON_SIZE - 1, iconY + HELP_ICON_SIZE - 1, border)
+
+        // Draw "?" text centered in the circle
+        val helpText = "?"
+        val textRenderer = mc.textRenderer
+        val textScale = 0.7f
+        val textWidth = textRenderer.getWidth(helpText) * textScale
+        val textHeight = textRenderer.fontHeight * textScale
+        // Center precisely with manual adjustments for Minecraft's text rendering offset
+        val textX = iconX + (HELP_ICON_SIZE / 2.0f) - (textWidth / 2.0f) + 0.5f
+        val textY = iconY + (HELP_ICON_SIZE / 2.0f) - (textHeight / 2.0f) + 1.0f
+
+        drawScaledText(
+            context = context,
+            text = Text.literal(helpText),
+            x = textX,
+            y = textY,
+            colour = applyOpacity(textColor),
+            scale = textScale,
+            shadow = false
+        )
+
+        matrices.pop()
+
+        return bounds
+    }
+
+    /**
      * Render a team using battle actor's pokemon list.
      * This uses authoritative battle data which works correctly on servers.
      * Also checks persistent KO tracking as a fallback for race conditions.
@@ -1323,12 +1628,13 @@ object TeamIndicatorUI {
         drawTeamPanel(context, startX, startY, team.size)
 
         // Track panel bounds for input handling
-        val panelWidth = team.size * MODEL_SIZE + (team.size - 1) * MODEL_SPACING + PANEL_PADDING_H * 2
-        val panelHeight = MODEL_SIZE + PANEL_PADDING_V * 2
+        val (panelWidth, panelHeight) = calculatePanelDimensions(team.size)
         val bounds = TooltipBoundsData(startX - PANEL_PADDING_H, startY - PANEL_PADDING_V, panelWidth, panelHeight)
         if (isLeftSide) leftTeamPanelBounds = bounds else rightTeamPanelBounds = bounds
 
+        val isVertical = PanelConfig.teamIndicatorOrientation == PanelConfig.TeamIndicatorOrientation.VERTICAL
         var x = startX
+        var y = startY
 
         for (pokemon in team) {
             // Use battle-authoritative data, with KO tracking as fallback
@@ -1338,7 +1644,7 @@ object TeamIndicatorUI {
             drawPokemonModel(
                 context = context,
                 x = x,
-                y = startY,
+                y = y,
                 renderablePokemon = pokemon.asRenderablePokemon(),
                 speciesIdentifier = null,
                 aspects = pokemon.aspects,
@@ -1352,20 +1658,28 @@ object TeamIndicatorUI {
             pokeballBounds.add(
                 PokeballBounds(
                     x,
-                    startY,
-                    MODEL_SIZE,
-                    MODEL_SIZE,
+                    y,
+                    modelSize,
+                    modelSize,
                     pokemon.uuid,
                     isLeftSide,
                     isPlayerPokemon = true
                 )
             )
 
-            x += MODEL_SIZE + MODEL_SPACING
+            if (isVertical) {
+                y += modelSize + modelSpacing
+            } else {
+                x += modelSize + modelSpacing
+            }
         }
 
         // Draw corner overlays AFTER models to ensure rounded corners appear on top
         drawPanelCornerOverlays(context, startX, startY, team.size)
+
+        // Draw help icon and track its bounds
+        val helpBounds = drawHelpIcon(context, bounds.x, bounds.y, panelWidth, panelHeight, isLeftSide)
+        if (isLeftSide) leftHelpIconBounds = helpBounds else rightHelpIconBounds = helpBounds
     }
 
     /**
@@ -1384,12 +1698,13 @@ object TeamIndicatorUI {
         drawTeamPanel(context, startX, startY, team.size)
 
         // Track panel bounds for input handling
-        val panelWidth = team.size * MODEL_SIZE + (team.size - 1) * MODEL_SPACING + PANEL_PADDING_H * 2
-        val panelHeight = MODEL_SIZE + PANEL_PADDING_V * 2
+        val (panelWidth, panelHeight) = calculatePanelDimensions(team.size)
         val bounds = TooltipBoundsData(startX - PANEL_PADDING_H, startY - PANEL_PADDING_V, panelWidth, panelHeight)
         if (isLeftSide) leftTeamPanelBounds = bounds else rightTeamPanelBounds = bounds
 
+        val isVertical = PanelConfig.teamIndicatorOrientation == PanelConfig.TeamIndicatorOrientation.VERTICAL
         var x = startX
+        var y = startY
 
         for (pokemon in team) {
             // Check both the tracked isKO flag and the persistent KO set
@@ -1409,7 +1724,7 @@ object TeamIndicatorUI {
             drawPokemonModel(
                 context = context,
                 x = x,
-                y = startY,
+                y = y,
                 renderablePokemon = null,
                 speciesIdentifier = displaySpecies,
                 aspects = displayAspects,
@@ -1423,20 +1738,28 @@ object TeamIndicatorUI {
             pokeballBounds.add(
                 PokeballBounds(
                     x,
-                    startY,
-                    MODEL_SIZE,
-                    MODEL_SIZE,
+                    y,
+                    modelSize,
+                    modelSize,
                     pokemon.uuid,
                     isLeftSide,
                     isPlayerPokemon = false
                 )
             )
 
-            x += MODEL_SIZE + MODEL_SPACING
+            if (isVertical) {
+                y += modelSize + modelSpacing
+            } else {
+                x += modelSize + modelSpacing
+            }
         }
 
         // Draw corner overlays AFTER models to ensure rounded corners appear on top
         drawPanelCornerOverlays(context, startX, startY, team.size)
+
+        // Draw help icon and track its bounds
+        val helpBounds = drawHelpIcon(context, bounds.x, bounds.y, panelWidth, panelHeight, isLeftSide)
+        if (isLeftSide) leftHelpIconBounds = helpBounds else rightHelpIconBounds = helpBounds
     }
 
     private fun getStatusColor(status: Status): Int {
@@ -1560,8 +1883,8 @@ object TeamIndicatorUI {
         val tint = getModelTint(isKO, status)
 
         // Calculate center position for model (centered in bounds)
-        val centerX = x + MODEL_SIZE / 2.0
-        val centerY = y + MODEL_SIZE / 2.0
+        val centerX = x + modelSize / 2.0
+        val centerY = y + modelSize / 2.0
 
         // PC-style rotation with slight tilt, facing towards center
         // Left side Pokemon look RIGHT (towards center): negative Y rotation
@@ -1573,14 +1896,14 @@ object TeamIndicatorUI {
             0f
         )
 
-        // Scale to fit in MODEL_SIZE
-        val scale = MODEL_SIZE / 3.0f
+        // Scale to fit in modelSize (scaled)
+        val scale = modelSize / 3.0f
 
         matrixStack.push()
         try {
             // Models render downward from translation point, so position near top of bounds
             // to have the model fill the space and appear vertically centered
-            val renderY = y + MODEL_SIZE * 0.1  // Position at ~10% from top
+            val renderY = y + modelSize * 0.1  // Position at ~10% from top
             matrixStack.translate(centerX, renderY, 0.0)
 
             if (renderablePokemon != null) {
@@ -1625,12 +1948,14 @@ object TeamIndicatorUI {
 
     /**
      * Draw a pokeball as fallback when model rendering fails.
-     * Uses the original pokeball rendering but centered in the larger MODEL_SIZE space.
+     * Uses the original pokeball rendering but centered in the scaled model space.
      */
     private fun drawPokeballFallback(context: DrawContext, x: Int, y: Int, isKO: Boolean, status: Status?) {
-        // Center the smaller pokeball in the larger model space
-        val offsetX = x + (MODEL_SIZE - BALL_SIZE) / 2
-        val offsetY = y + (MODEL_SIZE - BALL_SIZE) / 2
+        // Scale ball size proportionally
+        val scaledBallSize = (BALL_SIZE * PanelConfig.teamIndicatorScale).toInt()
+        // Center the pokeball in the model space
+        val offsetX = x + (modelSize - scaledBallSize) / 2
+        val offsetY = y + (modelSize - scaledBallSize) / 2
 
         val colors = when {
             isKO -> Quad(COLOR_KO_TOP, COLOR_KO_BOTTOM, COLOR_KO_BAND, COLOR_KO_CENTER)
@@ -1650,21 +1975,166 @@ object TeamIndicatorUI {
     // ═══════════════════════════════════════════════════════════════════════════
 
     /**
-     * Render tooltip for hovered pokeball.
+     * Render tooltip for hovered pokeball, or control hints when hovering help icon.
      * Should be called LAST in render pipeline to appear on top.
      */
     fun renderHoverTooltip(context: DrawContext) {
-        val hovered = hoveredPokeball ?: return
-        val battle = CobblemonClient.battle ?: return
+        val hovered = hoveredPokeball
 
-        // Get tracked pokemon data
-        val trackedPokemon = trackedSide1Pokemon[hovered.uuid] ?: trackedSide2Pokemon[hovered.uuid]
+        if (hovered != null) {
+            // Hovering over a specific Pokemon - show its tooltip
+            val battle = CobblemonClient.battle ?: return
+            val trackedPokemon = trackedSide1Pokemon[hovered.uuid] ?: trackedSide2Pokemon[hovered.uuid]
+            val battlePokemon = getBattlePokemonByUuid(hovered.uuid, battle)
+            val tooltipData = getTooltipData(hovered.uuid, trackedPokemon, battlePokemon, hovered.isPlayerPokemon)
+            renderTooltip(context, hovered, tooltipData)
+        } else {
+            // Not hovering a Pokemon - check if hovering help icon
+            val hoveredHelp = getHoveredHelpIcon()
+            if (hoveredHelp != null) {
+                renderControlHints(context, hoveredHelp)
+            }
+        }
+    }
 
-        // Get battle pokemon for additional data
-        val battlePokemon = getBattlePokemonByUuid(hovered.uuid, battle)
+    /**
+     * Get the help icon info if mouse is currently over a help icon.
+     * Returns pair of (panel bounds, isLeftSide) for hint positioning.
+     */
+    private fun getHoveredHelpIcon(): Pair<TooltipBoundsData, Boolean>? {
+        val mc = MinecraftClient.getInstance()
+        val mouseX = (mc.mouse.x * mc.window.scaledWidth / mc.window.width).toInt()
+        val mouseY = (mc.mouse.y * mc.window.scaledHeight / mc.window.height).toInt()
 
-        val tooltipData = getTooltipData(hovered.uuid, trackedPokemon, battlePokemon, hovered.isPlayerPokemon)
-        renderTooltip(context, hovered, tooltipData)
+        leftHelpIconBounds?.let { bounds ->
+            if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
+                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height
+            ) {
+                // Return panel bounds for hint positioning
+                return leftTeamPanelBounds?.let { Pair(it, true) }
+            }
+        }
+        rightHelpIconBounds?.let { bounds ->
+            if (mouseX >= bounds.x && mouseX <= bounds.x + bounds.width &&
+                mouseY >= bounds.y && mouseY <= bounds.y + bounds.height
+            ) {
+                // Return panel bounds for hint positioning
+                return rightTeamPanelBounds?.let { Pair(it, false) }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Check if the team indicators are in their default state.
+     */
+    private fun isInDefaultState(isLeftSide: Boolean): Boolean {
+        val hasDefaultOrientation = PanelConfig.teamIndicatorOrientation == PanelConfig.TeamIndicatorOrientation.HORIZONTAL
+        val hasDefaultScale = PanelConfig.teamIndicatorScale == 1.0f
+        val hasDefaultPosition = if (isLeftSide) {
+            PanelConfig.teamIndicatorLeftX == null && PanelConfig.teamIndicatorLeftY == null
+        } else {
+            PanelConfig.teamIndicatorRightX == null && PanelConfig.teamIndicatorRightY == null
+        }
+        return hasDefaultOrientation && hasDefaultScale && hasDefaultPosition
+    }
+
+    /**
+     * Render control hints below the panel when hovering the background.
+     */
+    private fun renderControlHints(context: DrawContext, panelInfo: Pair<TooltipBoundsData, Boolean>) {
+        val (bounds, isLeftSide) = panelInfo
+        val mc = MinecraftClient.getInstance()
+        val textRenderer = mc.textRenderer
+        val screenWidth = mc.window.scaledWidth
+        val screenHeight = mc.window.scaledHeight
+
+        // Hint text segments with separators
+        val isCustomized = !isInDefaultState(isLeftSide)
+        val repositioningEnabled = PanelConfig.teamIndicatorRepositioningEnabled
+
+        val hints = buildList {
+            add(Pair("Shift+Click", ": Flip"))
+            add(Pair("  •  ", ""))
+            if (repositioningEnabled) {
+                add(Pair("Drag", ": Move"))
+                add(Pair("  •  ", ""))
+                add(Pair("Dbl-Click", ": Reset"))
+                add(Pair("  •  ", ""))
+            }
+            add(Pair("Ctrl+Scroll", ": Scale"))
+        }
+
+        // Calculate dimensions
+        val hintScale = 0.7f
+        val hintText = hints.joinToString("") { it.first + it.second }
+        val hintWidth = (textRenderer.getWidth(hintText) * hintScale).toInt() + 8
+        val hintHeight = (textRenderer.fontHeight * hintScale).toInt() + 4
+
+        // Position below the panel, centered
+        var hintX = bounds.x + (bounds.width / 2) - (hintWidth / 2)
+        var hintY = bounds.y + bounds.height + 2
+
+        // Clamp to screen bounds
+        hintX = hintX.coerceIn(2, screenWidth - hintWidth - 2)
+        if (hintY + hintHeight > screenHeight - 2) {
+            // Show above panel if not enough space below
+            hintY = bounds.y - hintHeight - 2
+        }
+
+        // Colors
+        val bgColor = color(15, 20, 25, 200)
+        val borderColor = color(50, 60, 70, 200)
+        val keyColor = if (isCustomized) color(180, 200, 140, 255) else color(140, 160, 180, 255)
+        val textColor = color(100, 110, 120, 255)
+        val separatorColor = color(70, 80, 90, 255)
+
+        val matrices = context.matrices
+        matrices.push()
+        matrices.translate(0.0, 0.0, 400.0)
+
+        // Draw background
+        context.fill(hintX, hintY, hintX + hintWidth, hintY + hintHeight, applyOpacity(bgColor))
+        // Draw border (top and bottom lines only for subtle look)
+        context.fill(hintX, hintY, hintX + hintWidth, hintY + 1, applyOpacity(borderColor))
+        context.fill(hintX, hintY + hintHeight - 1, hintX + hintWidth, hintY + hintHeight, applyOpacity(borderColor))
+
+        // Draw hint text
+        var textX = (hintX + 4).toFloat()
+        val textY = (hintY + 2).toFloat()
+
+        for ((key, action) in hints) {
+            val color = when {
+                key.contains("•") -> separatorColor
+                action.isEmpty() -> separatorColor
+                else -> keyColor
+            }
+            drawScaledText(
+                context = context,
+                text = Text.literal(key),
+                x = textX,
+                y = textY,
+                colour = applyOpacity(color),
+                scale = hintScale,
+                shadow = false
+            )
+            textX += textRenderer.getWidth(key) * hintScale
+
+            if (action.isNotEmpty()) {
+                drawScaledText(
+                    context = context,
+                    text = Text.literal(action),
+                    x = textX,
+                    y = textY,
+                    colour = applyOpacity(textColor),
+                    scale = hintScale,
+                    shadow = false
+                )
+                textX += textRenderer.getWidth(action) * hintScale
+            }
+        }
+
+        matrices.pop()
     }
 
     private fun getBattlePokemonByUuid(
@@ -2306,7 +2776,9 @@ object TeamIndicatorUI {
     }
 
     /**
-     * Handle scroll event for font scaling when Ctrl is held.
+     * Handle scroll event for scaling when Ctrl is held.
+     * Ctrl+Scroll: Adjust team indicator scale (model size)
+     * Ctrl+Shift+Scroll: Adjust tooltip font scale
      * Returns true if the event was consumed.
      */
     fun handleScroll(deltaY: Double): Boolean {
@@ -2316,10 +2788,18 @@ object TeamIndicatorUI {
         val handle = mc.window.handle
         val isCtrlDown = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS ||
             GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS
+        val isShiftDown = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS ||
+            GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS
 
         if (isCtrlDown) {
             val delta = if (deltaY > 0) PanelConfig.FONT_SCALE_STEP else -PanelConfig.FONT_SCALE_STEP
-            PanelConfig.adjustTooltipFontScale(delta)
+            if (isShiftDown) {
+                // Ctrl+Shift+Scroll: Adjust tooltip font scale
+                PanelConfig.adjustTooltipFontScale(delta)
+            } else {
+                // Ctrl+Scroll: Adjust team indicator scale (model size)
+                PanelConfig.adjustTeamIndicatorScale(delta)
+            }
             PanelConfig.save()
             return true
         }

@@ -96,8 +96,34 @@ object PanelConfig {
         private set
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Team indicator tooltip settings
+    // Team indicator settings
     // ═══════════════════════════════════════════════════════════════════════════
+
+    // Orientation for team indicators (both sides use the same)
+    enum class TeamIndicatorOrientation { HORIZONTAL, VERTICAL }
+
+    var teamIndicatorOrientation: TeamIndicatorOrientation = TeamIndicatorOrientation.HORIZONTAL
+        private set
+
+    // Scale for team indicators (0.5 to 2.0)
+    var teamIndicatorScale: Float = 1.0f
+        private set
+
+    // Custom position for left team indicator (null = default position below health bar)
+    var teamIndicatorLeftX: Int? = null
+        private set
+    var teamIndicatorLeftY: Int? = null
+        private set
+
+    // Custom position for right team indicator (null = default position below health bar)
+    var teamIndicatorRightX: Int? = null
+        private set
+    var teamIndicatorRightY: Int? = null
+        private set
+
+    // Whether team indicators can be repositioned via drag (default: true)
+    var teamIndicatorRepositioningEnabled: Boolean = true
+        private set
 
     // Tooltip font scale (separate from other panels)
     var tooltipFontScale: Float = 1.0f
@@ -167,6 +193,14 @@ object PanelConfig {
         val logHeight: Int? = null,
         val logFontScale: Float = 1.0f,
         val logExpanded: Boolean = true,
+        // Team indicator settings
+        val teamIndicatorOrientation: String = "HORIZONTAL",
+        val teamIndicatorScale: Float = 1.0f,
+        val teamIndicatorLeftX: Int? = null,
+        val teamIndicatorLeftY: Int? = null,
+        val teamIndicatorRightX: Int? = null,
+        val teamIndicatorRightY: Int? = null,
+        val teamIndicatorRepositioningEnabled: Boolean = true,
         // Tooltip settings
         val tooltipFontScale: Float = 1.0f,
         val moveTooltipFontScale: Float = 1.0f,
@@ -201,6 +235,19 @@ object PanelConfig {
                 logHeight = data.logHeight
                 logFontScale = data.logFontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
                 logExpanded = data.logExpanded
+                // Team indicator settings
+                teamIndicatorOrientation = try {
+                    TeamIndicatorOrientation.valueOf(data.teamIndicatorOrientation)
+                } catch (e: IllegalArgumentException) {
+                    TeamIndicatorOrientation.HORIZONTAL
+                }
+                teamIndicatorScale = data.teamIndicatorScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+                teamIndicatorLeftX = data.teamIndicatorLeftX
+                teamIndicatorLeftY = data.teamIndicatorLeftY
+                teamIndicatorRightX = data.teamIndicatorRightX
+                teamIndicatorRightY = data.teamIndicatorRightY
+                teamIndicatorRepositioningEnabled = data.teamIndicatorRepositioningEnabled
+                // Tooltip settings
                 tooltipFontScale = data.tooltipFontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
                 moveTooltipFontScale = data.moveTooltipFontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
                 // Tooltip display options
@@ -235,6 +282,13 @@ object PanelConfig {
                 logHeight = logHeight,
                 logFontScale = logFontScale,
                 logExpanded = logExpanded,
+                teamIndicatorOrientation = teamIndicatorOrientation.name,
+                teamIndicatorScale = teamIndicatorScale,
+                teamIndicatorLeftX = teamIndicatorLeftX,
+                teamIndicatorLeftY = teamIndicatorLeftY,
+                teamIndicatorRightX = teamIndicatorRightX,
+                teamIndicatorRightY = teamIndicatorRightY,
+                teamIndicatorRepositioningEnabled = teamIndicatorRepositioningEnabled,
                 tooltipFontScale = tooltipFontScale,
                 moveTooltipFontScale = moveTooltipFontScale,
                 showTeraType = showTeraType,
@@ -318,6 +372,70 @@ object PanelConfig {
 
     fun setLogExpanded(expanded: Boolean) {
         logExpanded = expanded
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Team indicator management
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    fun setTeamIndicatorOrientation(orientation: TeamIndicatorOrientation) {
+        teamIndicatorOrientation = orientation
+    }
+
+    fun toggleTeamIndicatorOrientation() {
+        teamIndicatorOrientation = when (teamIndicatorOrientation) {
+            TeamIndicatorOrientation.HORIZONTAL -> TeamIndicatorOrientation.VERTICAL
+            TeamIndicatorOrientation.VERTICAL -> TeamIndicatorOrientation.HORIZONTAL
+        }
+    }
+
+    fun adjustTeamIndicatorScale(delta: Float) {
+        teamIndicatorScale = (teamIndicatorScale + delta).coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+    }
+
+    fun setTeamIndicatorLeftPosition(x: Int?, y: Int?) {
+        teamIndicatorLeftX = x
+        teamIndicatorLeftY = y
+    }
+
+    fun setTeamIndicatorRightPosition(x: Int?, y: Int?) {
+        teamIndicatorRightX = x
+        teamIndicatorRightY = y
+    }
+
+    /**
+     * Reset left team indicator to default position (below health bar).
+     */
+    fun resetTeamIndicatorLeftPosition() {
+        teamIndicatorLeftX = null
+        teamIndicatorLeftY = null
+    }
+
+    /**
+     * Reset right team indicator to default position (below health bar).
+     */
+    fun resetTeamIndicatorRightPosition() {
+        teamIndicatorRightX = null
+        teamIndicatorRightY = null
+    }
+
+    /**
+     * Reset all team indicator customizations (both positions, scale, orientation).
+     */
+    fun resetAllTeamIndicatorSettings() {
+        teamIndicatorOrientation = TeamIndicatorOrientation.HORIZONTAL
+        teamIndicatorScale = 1.0f
+        teamIndicatorLeftX = null
+        teamIndicatorLeftY = null
+        teamIndicatorRightX = null
+        teamIndicatorRightY = null
+    }
+
+    /**
+     * Enable or disable team indicator repositioning via drag.
+     */
+    fun setTeamIndicatorRepositioningEnabled(enabled: Boolean) {
+        teamIndicatorRepositioningEnabled = enabled
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

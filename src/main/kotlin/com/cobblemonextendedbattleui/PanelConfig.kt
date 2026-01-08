@@ -107,6 +107,20 @@ object PanelConfig {
     var moveTooltipFontScale: Float = 1.0f
         private set
 
+    // Show tera type in Pokemon tooltips (when known)
+    // Disabled by default due to noisiness.
+    var showTeraType: Boolean = false
+        private set
+
+    // Show stat values (Attack, Defense, Sp. Atk, Sp. Def, Speed) in Pokemon tooltips
+    var showStatRanges: Boolean = true
+        private set
+
+    // Show base crit rate in move tooltips (even when not boosted)
+    // Disabled by default due to noisiness.
+    var showBaseCritRate: Boolean = false
+        private set
+
     // Default log dimensions
     const val DEFAULT_LOG_WIDTH = 200
     const val DEFAULT_LOG_HEIGHT = 120
@@ -155,7 +169,11 @@ object PanelConfig {
         val logExpanded: Boolean = true,
         // Tooltip settings
         val tooltipFontScale: Float = 1.0f,
-        val moveTooltipFontScale: Float = 1.0f
+        val moveTooltipFontScale: Float = 1.0f,
+        // Tooltip display options
+        val showTeraType: Boolean = false,
+        val showStatRanges: Boolean = true,
+        val showBaseCritRate: Boolean = false
     )
 
     fun load() {
@@ -185,6 +203,10 @@ object PanelConfig {
                 logExpanded = data.logExpanded
                 tooltipFontScale = data.tooltipFontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
                 moveTooltipFontScale = data.moveTooltipFontScale.coerceIn(MIN_FONT_SCALE, MAX_FONT_SCALE)
+                // Tooltip display options
+                showTeraType = data.showTeraType
+                showStatRanges = data.showStatRanges
+                showBaseCritRate = data.showBaseCritRate
                 CobblemonExtendedBattleUI.LOGGER.info("PanelConfig: Loaded config - features: team=$enableTeamIndicators, panel=$enableBattleInfoPanel, log=$enableBattleLog, moveTooltips=$enableMoveTooltips")
             }
         } catch (e: Exception) {
@@ -214,7 +236,10 @@ object PanelConfig {
                 logFontScale = logFontScale,
                 logExpanded = logExpanded,
                 tooltipFontScale = tooltipFontScale,
-                moveTooltipFontScale = moveTooltipFontScale
+                moveTooltipFontScale = moveTooltipFontScale,
+                showTeraType = showTeraType,
+                showStatRanges = showStatRanges,
+                showBaseCritRate = showBaseCritRate
             )
             configFile.parentFile?.mkdirs()
             configFile.writeText(gson.toJson(data))
@@ -313,6 +338,22 @@ object PanelConfig {
 
     fun setEnableMoveTooltips(enabled: Boolean) {
         enableMoveTooltips = enabled
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Tooltip display option setters
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    fun setShowTeraType(show: Boolean) {
+        showTeraType = show
+    }
+
+    fun setShowStatRanges(show: Boolean) {
+        showStatRanges = show
+    }
+
+    fun setShowBaseCritRate(show: Boolean) {
+        showBaseCritRate = show
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -219,6 +219,7 @@ object MoveTooltipRenderer {
             // Check for held item power boost
             val itemBoost = getHeldItemPowerBoost(template.elementalType.name)
 
+
             // Calculate effective power with modifiers
             var effectivePower = template.power
             val modifiers = mutableListOf<String>()
@@ -255,54 +256,54 @@ object MoveTooltipRenderer {
         // Critical hit rate display
         // Gen 6+ crit stages: Stage 0 = 1/24 (4.17%), +1 = 1/8 (12.5%), +2 = 1/2 (50%), +3+ = 100%
         // critRatio in Showdown: 1 = Stage 0, 2 = Stage +1, 3 = Stage +2, 4+ = Stage +3+
-        // Super Luck adds +1 to crit stage, Scope Lens/Razor Claw add +1 to crit stage
+
         if (template.power > 0) {
             val baseCritRatio = template.critRatio
-            val hasSuperLuck = getPlayerPokemonAbility() == "superluck"
-            val heldItemName = getPlayerPokemonHeldItem()
-            val hasCritItem = heldItemName == "scope_lens" || heldItemName == "razor_claw"
 
-            // Calculate total crit stage bonus
+            val hasSuperLuck = getPlayerPokemonAbility() == "superluck"
+            val heldItemId = getPlayerPokemonHeldItemId()
+            val hasCritItem = heldItemId == "cobblemon:scope_lens" || heldItemId == "cobblemon:razor_claw"
+
             var critBonus = 0
             val boostSources = mutableListOf<String>()
+
             if (hasSuperLuck) {
                 critBonus++
                 boostSources.add("Super Luck")
             }
+
             if (hasCritItem) {
                 critBonus++
-                val itemDisplayName = if (heldItemName == "scope_lens") "Scope Lens" else "Razor Claw"
-                boostSources.add(itemDisplayName)
+                boostSources.add(
+                    if (heldItemId == "cobblemon:scope_lens") "Scope Lens" else "Razor Claw"
+                )
             }
 
-            val effectiveCritRatio = (baseCritRatio + critBonus).coerceAtMost(4.0)
-            val baseCritPercent = critRatioToPercent(baseCritRatio)
-            val effectiveCritPercent = critRatioToPercent(effectiveCritRatio)
+            // Only show crit rate if: setting enabled, move has high crit, or there are boosts
+            val shouldShowCrit = PanelConfig.showBaseCritRate || baseCritRatio > 1.0 || critBonus > 0
 
-            when {
-                // Has crit boosts on a normal move - show the boost
-                critBonus > 0 && baseCritRatio <= 1.0 -> {
+            if (shouldShowCrit) {
+                val effectiveCritRatio = (baseCritRatio + critBonus).coerceAtMost(4.0)
+
+                val baseCritPercent = critRatioToPercent(baseCritRatio)
+                val effectiveCritPercent = critRatioToPercent(effectiveCritRatio)
+
+                // Decide label
+                val critLabel = if (baseCritRatio > 1.0) "High Crit" else "Crit"
+
+                val line = mutableListOf<Pair<String, Int>>()
+                line.add("$critLabel: $baseCritPercent" to COLOR_CRIT)
+
+                // If boosted, show improvement
+                if (critBonus > 0) {
                     val boostText = boostSources.joinToString(" + ")
-                    lines.add(listOf(
-                        "Crit: $baseCritPercent " to COLOR_CRIT,
-                        "($boostText: $effectiveCritPercent)" to SUPER_EFFECTIVE_2X
-                    ))
+                    line.add(" ($boostText → $effectiveCritPercent)" to SUPER_EFFECTIVE_2X)
                 }
-                // Has crit boosts on a high crit move - show both
-                critBonus > 0 && baseCritRatio > 1.0 -> {
-                    val boostText = boostSources.joinToString(" + ")
-                    lines.add(listOf(
-                        "High Crit: $baseCritPercent " to COLOR_CRIT,
-                        "($boostText: $effectiveCritPercent)" to SUPER_EFFECTIVE_2X
-                    ))
-                }
-                // No boosts, but move has elevated crit
-                baseCritRatio > 1.0 -> {
-                    lines.add(listOf("High Crit: $baseCritPercent" to COLOR_CRIT))
-                }
-                // Normal crit rate without any boosts - don't show (4.17% is standard)
+
+                lines.add(line)
             }
         }
+
 
         // Effect chance (e.g., 10% for Ember's burn)
         // Abilities: Serene Grace doubles chance, Sheer Force removes effect for power boost
@@ -387,8 +388,12 @@ object MoveTooltipRenderer {
         val isStatusMove = move.moveTemplate.damageCategory == DamageCategories.STATUS
 
         for (opponent in opponents) {
-            val species = opponent.species ?: continue
-            val types = listOfNotNull(species.primaryType, species.secondaryType)
+            // Get form-specific types using species + aspects
+            // e.g., Hisuian Zoroark's aspects include "hisuian" which gives Ghost/Normal typing
+            val species = opponent.species
+            val aspects = opponent.state.currentAspects
+            val form = species.getForm(aspects)
+            val types = listOfNotNull(form.primaryType, form.secondaryType)
 
             if (types.isEmpty()) continue
 
@@ -463,9 +468,12 @@ object MoveTooltipRenderer {
         val battle = CobblemonClient.battle ?: return emptyList()
         val playerUUID = MinecraftClient.getInstance().player?.uuid ?: return emptyList()
         val playerSide = if (battle.side1.actors.any { it.uuid == playerUUID }) battle.side1 else battle.side2
-        val playerPokemon = playerSide.activeClientBattlePokemon.firstOrNull()?.battlePokemon ?: return emptyList()
-        val species = playerPokemon.species ?: return emptyList()
-        return listOfNotNull(species.primaryType, species.secondaryType)
+        val clientBattlePokemon = playerSide.activeClientBattlePokemon.firstOrNull()?.battlePokemon ?: return emptyList()
+        // Get form-specific types using species + aspects
+        val species = clientBattlePokemon.species
+        val aspects = clientBattlePokemon.state.currentAspects
+        val form = species.getForm(aspects)
+        return listOfNotNull(form.primaryType, form.secondaryType)
     }
 
     /**
@@ -481,11 +489,42 @@ object MoveTooltipRenderer {
     }
 
     /**
-     * Get the held item name of the player's active Pokemon.
-     * Returns the Showdown ID for the item (e.g., "charcoal", "lifeorb").
-     * Returns null if the item is empty or has been consumed (e.g., gems after use).
+     * Get the held item's full registry ID (e.g., "cobblemon:scope_lens").
+     * Returns null if the item is empty or has been consumed.
      */
-    private fun getPlayerPokemonHeldItem(): String? {
+    private fun getPlayerPokemonHeldItemId(): String? {
+        val heldItem = getPlayerPokemonHeldItemStack() ?: return null
+        return heldItem.item.toString()
+    }
+
+    /**
+     * Get the held item name in Showdown format (e.g., "charcoal", "lifeorb").
+     * Returns null if the item is empty or has been consumed.
+     */
+    private fun getPlayerPokemonHeldItemShowdownName(): String? {
+        val heldItem = getPlayerPokemonHeldItemStack() ?: return null
+
+        // First try to get the Showdown ID from the HELD_ITEM_EFFECT component
+        // This handles remapped items like charcoal_stick -> charcoal
+        val heldItemEffect = heldItem.get(CobblemonItemComponents.HELD_ITEM_EFFECT)
+        if (heldItemEffect != null) {
+            // Check if the item has been consumed (e.g., gems after use)
+            if (heldItemEffect.consumed) {
+                return null
+            }
+            return heldItemEffect.showdownId
+        }
+
+        // Fallback: get from registry path and remove underscores (Showdown format)
+        val registryPath = Registries.ITEM.getId(heldItem.item).path
+        return registryPath.replace("_", "")
+    }
+
+    /**
+     * Get the held item stack of the player's active Pokemon.
+     * Returns null if the item is empty or has been consumed/knocked off/stolen.
+     */
+    private fun getPlayerPokemonHeldItemStack(): net.minecraft.item.ItemStack? {
         val battle = CobblemonClient.battle ?: return null
         val playerUUID = MinecraftClient.getInstance().player?.uuid ?: return null
         val playerSide = if (battle.side1.actors.any { it.uuid == playerUUID }) battle.side1 else battle.side2
@@ -506,20 +545,7 @@ object MoveTooltipRenderer {
         val heldItem = partyPokemon.heldItem()
         if (heldItem.isEmpty) return null
 
-        // First try to get the Showdown ID from the HELD_ITEM_EFFECT component
-        // This handles remapped items like charcoal_stick -> charcoal
-        val heldItemEffect = heldItem.get(CobblemonItemComponents.HELD_ITEM_EFFECT)
-        if (heldItemEffect != null) {
-            // Check if the item has been consumed (e.g., gems after use)
-            if (heldItemEffect.consumed) {
-                return null
-            }
-            return heldItemEffect.showdownId
-        }
-
-        // Fallback: get from registry path and remove underscores (Showdown format)
-        val registryPath = Registries.ITEM.getId(heldItem.item).path
-        return registryPath.replace("_", "")
+        return heldItem
     }
 
     /**
@@ -528,9 +554,8 @@ object MoveTooltipRenderer {
      * @return The item boost info if applicable, null otherwise
      */
     private fun getHeldItemPowerBoost(moveType: String): ItemPowerBoostParser.ItemPowerBoost? {
-        val heldItemName = getPlayerPokemonHeldItem() ?: return null
+        val heldItemName = getPlayerPokemonHeldItemShowdownName() ?: return null
         val boost = ItemPowerBoostParser.getBoostForItem(heldItemName) ?: return null
-
         // Check if boost applies to this move type
         return when {
             boost.boostedType == null -> boost  // Life Orb - applies to all damaging moves

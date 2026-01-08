@@ -52,6 +52,10 @@ object ItemPowerBoostParser {
         itemBoosts = parseItemsFile()
     }
 
+    private val finalItemId: Map<String, String> = mapOf(
+        "charcoal" to "charcoalstick"
+    )
+
     private fun parseItemsFile(): Map<String, ItemPowerBoost> {
         val result = mutableMapOf<String, ItemPowerBoost>()
 
@@ -84,9 +88,10 @@ object ItemPowerBoostParser {
                         if (block.contains("baseSpecies") || block.contains("itemUser")) {
                             continue
                         }
+                        val finalId = finalItemId[itemId] ?: itemId
 
-                        result[itemId] = ItemPowerBoost(
-                            itemId = itemId,
+                        result[finalId] = ItemPowerBoost(
+                            itemId = finalId,
                             displayName = displayName,
                             boostedType = type,
                             multiplier = multiplier,

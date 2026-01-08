@@ -73,6 +73,47 @@ class ModMenuIntegration : ModMenuApi {
                 .build()
         )
 
+        // Tooltip Display Options category
+        val tooltipOptions = builder.getOrCreateCategory(Text.translatable("cobblemonextendedbattleui.config.category.tooltipOptions"))
+
+        // Show Tera Type toggle
+        tooltipOptions.addEntry(
+            entryBuilder.startBooleanToggle(
+                Text.translatable("cobblemonextendedbattleui.config.showTeraType"),
+                PanelConfig.showTeraType
+            )
+                // Disabled by default due to noisiness
+                .setDefaultValue(false)
+                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.showTeraType.tooltip"))
+                .setSaveConsumer { value -> PanelConfig.setShowTeraType(value) }
+                .build()
+        )
+
+        // Show Stat Ranges toggle
+        tooltipOptions.addEntry(
+            entryBuilder.startBooleanToggle(
+                Text.translatable("cobblemonextendedbattleui.config.showStatRanges"),
+                PanelConfig.showStatRanges
+            )
+                .setDefaultValue(true)
+                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.showStatRanges.tooltip"))
+                .setSaveConsumer { value -> PanelConfig.setShowStatRanges(value) }
+                .build()
+        )
+
+        // Show Base Crit Rate toggle
+        tooltipOptions.addEntry(
+            entryBuilder.startBooleanToggle(
+                Text.translatable("cobblemonextendedbattleui.config.showBaseCritRate"),
+                PanelConfig.showBaseCritRate
+            )
+                // Disabled by default due to noisiness
+                .setDefaultValue(false)
+                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.showBaseCritRate.tooltip"))
+                .setSaveConsumer { value -> PanelConfig.setShowBaseCritRate(value) }
+                .build()
+        )
+
         return builder.build()
     }
 }

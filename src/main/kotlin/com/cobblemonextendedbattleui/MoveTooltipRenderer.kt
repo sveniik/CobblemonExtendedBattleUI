@@ -388,8 +388,12 @@ object MoveTooltipRenderer {
         val isStatusMove = move.moveTemplate.damageCategory == DamageCategories.STATUS
 
         for (opponent in opponents) {
-            val species = opponent.species ?: continue
-            val types = listOfNotNull(species.primaryType, species.secondaryType)
+            // Get form-specific types using species + aspects
+            // e.g., Hisuian Zoroark's aspects include "hisuian" which gives Ghost/Normal typing
+            val species = opponent.species
+            val aspects = opponent.state.currentAspects
+            val form = species.getForm(aspects)
+            val types = listOfNotNull(form.primaryType, form.secondaryType)
 
             if (types.isEmpty()) continue
 
@@ -464,9 +468,12 @@ object MoveTooltipRenderer {
         val battle = CobblemonClient.battle ?: return emptyList()
         val playerUUID = MinecraftClient.getInstance().player?.uuid ?: return emptyList()
         val playerSide = if (battle.side1.actors.any { it.uuid == playerUUID }) battle.side1 else battle.side2
-        val playerPokemon = playerSide.activeClientBattlePokemon.firstOrNull()?.battlePokemon ?: return emptyList()
-        val species = playerPokemon.species ?: return emptyList()
-        return listOfNotNull(species.primaryType, species.secondaryType)
+        val clientBattlePokemon = playerSide.activeClientBattlePokemon.firstOrNull()?.battlePokemon ?: return emptyList()
+        // Get form-specific types using species + aspects
+        val species = clientBattlePokemon.species
+        val aspects = clientBattlePokemon.state.currentAspects
+        val form = species.getForm(aspects)
+        return listOfNotNull(form.primaryType, form.secondaryType)
     }
 
     /**

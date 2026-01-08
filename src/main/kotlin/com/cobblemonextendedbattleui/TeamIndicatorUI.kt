@@ -1,7 +1,6 @@
 package com.cobblemonextendedbattleui
 
 import com.cobblemon.mod.common.api.moves.Moves
-import com.cobblemon.mod.common.api.pokemon.Natures
 import com.cobblemon.mod.common.api.pokemon.PokemonSpecies
 import com.cobblemon.mod.common.api.pokemon.stats.Stats
 import com.cobblemon.mod.common.api.pokemon.status.Status
@@ -18,10 +17,8 @@ import com.cobblemon.mod.common.client.render.drawScaledText
 import com.cobblemon.mod.common.client.render.models.blockbench.FloatingState
 import com.cobblemon.mod.common.entity.PoseType
 import com.cobblemon.mod.common.pokemon.FormData
-import com.cobblemon.mod.common.pokemon.Nature
 import com.cobblemon.mod.common.pokemon.Pokemon
 import com.cobblemon.mod.common.pokemon.RenderablePokemon
-import com.cobblemon.mod.common.pokemon.Species
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.util.InputUtil
@@ -29,7 +26,7 @@ import net.minecraft.text.Text
 import net.minecraft.util.Identifier
 import org.joml.Quaternionf
 import org.lwjgl.glfw.GLFW
-import java.util.*
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -126,8 +123,7 @@ object TeamIndicatorUI {
         var originalAspects: Set<String> = emptySet(),
         var isTransformed: Boolean = false,
         var form: FormData? = null,
-        var teraType: TeraType? = null,
-        val nature: Nature? = null
+        var teraType: TeraType? = null
     )
 
     // Track Pokemon for both sides separately (for spectating and opponent tracking)
@@ -210,8 +206,7 @@ object TeamIndicatorUI {
         val primaryType: ElementalType? = null,
         val secondaryType: ElementalType? = null,
         val teraType: TeraType? = null,
-        val form: FormData ? = null,
-        val nature: Nature ? = null
+        val form: FormData? = null
     )
 
     // Currently rendered pokeball bounds (refreshed each frame)
@@ -544,11 +539,6 @@ object TeamIndicatorUI {
         val minSpeed: Int,
         val maxSpeed: Int,
         val abilityNote: String? = null  // Note if ability could boost speed
-    )
-    data class RangeResult(
-        val min: Int,
-        val max: Int,
-        val ability: String? = null  // Note if ability could boost speed
     )
 
     /**
@@ -1067,8 +1057,7 @@ object TeamIndicatorUI {
                     originalAspects = originalAspects,
                     isTransformed = isTransformed,
                     form = form,
-                    teraType = teraType,
-                    nature = battlePokemon.properties.nature?.let { Natures.getNature(it) }
+                    teraType = teraType
                 )
             }
         }
@@ -1829,8 +1818,7 @@ object TeamIndicatorUI {
             primaryType = primaryType,
             secondaryType = secondaryType,
             teraType = teraType,
-            form = trackedPokemon?.form,
-            nature = trackedPokemon?.nature
+            form = trackedPokemon?.form
         )
     }
 
@@ -1861,20 +1849,19 @@ object TeamIndicatorUI {
             lines.add(typeSegments)
         }
 
-        // Tera Type
-        if (data.teraType != null) {
+        // Tera Type (only show if known and enabled in settings)
+        if (PanelConfig.showTeraType && data.teraType != null) {
             val typeSegments = mutableListOf<Pair<String, Int>>()
             typeSegments.add("Tera Type: " to TOOLTIP_LABEL)
-            val elementalType = ElementalTypes.get(data.teraType.showdownId());
+            val elementalType = ElementalTypes.get(data.teraType.showdownId())
             if (elementalType != null) {
                 typeSegments.add(elementalType.displayName.string to UIUtils.getTypeColor(elementalType))
             } else {
                 typeSegments.add(data.teraType.name to TOOLTIP_TEXT)
             }
-            lines.add(typeSegments);
-        } else {
-            lines.add(listOf("Tera Type: Unknown" to TOOLTIP_LABEL))
+            lines.add(typeSegments)
         }
+
         // Ability
         if (data.abilityName != null) {
             // Known ability (player Pokemon or revealed opponent ability)
@@ -1972,122 +1959,54 @@ object TeamIndicatorUI {
             lines.add(statSegments)
         }
 
-        // Attack
-        if (data.isPlayerPokemon && data.actualAttack != null) {
-            val attackStage = data.statChanges[BattleStateTracker.BattleStat.ATTACK] ?: 0
-            val effectiveAttack = calculateEffectiveStat(
-                data.actualAttack,
-                attackStage,
-                BattleStateTracker.BattleStat.ATTACK,
-                data.nature
-            )
-            val modifiers = mutableListOf<String>()
-            if (attackStage != 0) modifiers.add(if (attackStage > 0) "+$attackStage" else "$attackStage")
-            val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
-            lines.add(listOf("Attack: $effectiveAttack$modText" to TOOLTIP_ATTACK))
-        }
-
-        // Defense
-        val defenceStage = data.statChanges[BattleStateTracker.BattleStat.DEFENSE] ?: 0
-
-        if (data.isPlayerPokemon && data.actualDefence != null) {
-            val itemName = data.item?.name
-            val itemConsumed = data.item?.status == BattleStateTracker.ItemStatus.CONSUMED
-
-            val effectiveDefence = calculateEffectiveStat(
-                data.actualDefence,
-                defenceStage,
-                BattleStateTracker.BattleStat.DEFENSE,
-                data.nature
-            )
-
-            // Build modifier notes (igual que Speed)
-            val modifiers = mutableListOf<String>()
-            if (defenceStage != 0) {
-                modifiers.add(if (defenceStage > 0) "+$defenceStage" else "$defenceStage")
+        // Stat values (Attack, Defense, Sp. Atk, Sp. Def) - only show if enabled in settings
+        if (PanelConfig.showStatRanges) {
+            // Attack
+            if (data.isPlayerPokemon && data.actualAttack != null) {
+                val attackStage = data.statChanges[BattleStateTracker.BattleStat.ATTACK] ?: 0
+                val effectiveAttack = applyStageMultiplier(data.actualAttack, attackStage)
+                val modifiers = mutableListOf<String>()
+                if (attackStage != 0) modifiers.add(if (attackStage > 0) "+$attackStage" else "$attackStage")
+                val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
+                lines.add(listOf("Attack: $effectiveAttack$modText" to TOOLTIP_ATTACK))
             }
 
-            // Si en el futuro tienes habilidades/items que afecten defensa,
-            // aquí es donde se añaden (ejemplo comentado)
-            /*
-            val abilityMult = getAbilityDefenseMultiplier(data.abilityName, ...)
-            if (abilityMult != 1.0) modifiers.add(data.abilityName)
-
-            if (itemName != null && getItemDefenseMultiplier(itemName) != 1.0 && !itemConsumed) {
-                modifiers.add(itemName)
-            }
-            */
-
-            val modText = if (modifiers.isNotEmpty())
-                " (${modifiers.joinToString(", ")})"
-            else ""
-
-            lines.add(
-                listOf(
-                    "Defense: $effectiveDefence$modText" to TOOLTIP_DEFENSE
-                )
-            )
-        }
-
-        // Special Attack
-        if (data.isPlayerPokemon && data.actualSpecialAttack != null) {
-            val specialAttackStage = data.statChanges[BattleStateTracker.BattleStat.SPECIAL_ATTACK] ?: 0
-            val effectiveSpecialAttack = calculateEffectiveStat(
-                data.actualSpecialAttack,
-                specialAttackStage,
-                BattleStateTracker.BattleStat.SPECIAL_ATTACK,
-                data.nature
-            )
-            val modifiers = mutableListOf<String>()
-            if (specialAttackStage != 0) modifiers.add(if (specialAttackStage > 0) "+$specialAttackStage" else "$specialAttackStage")
-            val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
-            lines.add(listOf("Special Attack: $effectiveSpecialAttack$modText" to TOOLTIP_SPECIAL_ATTACK))
-        }
-
-
-
-        // Special Defense
-        val specialDefenceStage = data.statChanges[BattleStateTracker.BattleStat.SPECIAL_DEFENSE] ?: 0
-        if (data.isPlayerPokemon && data.actualSpecialDefence != null) {
-            val itemName = data.item?.name
-            val itemConsumed = data.item?.status == BattleStateTracker.ItemStatus.CONSUMED
-
-            val effectiveSpecialDefence = calculateEffectiveStat(
-                data.actualSpecialDefence,
-                specialDefenceStage,
-                BattleStateTracker.BattleStat.SPECIAL_DEFENSE,
-                data.nature
-            )
-
-            // Build modifier notes (igual que Speed)
-            val modifiers = mutableListOf<String>()
-            if (specialDefenceStage != 0) {
-                modifiers.add(if (specialDefenceStage > 0) "+$specialDefenceStage" else "$specialDefenceStage")
+            // Defense
+            if (data.isPlayerPokemon && data.actualDefence != null) {
+                val defenceStage = data.statChanges[BattleStateTracker.BattleStat.DEFENSE] ?: 0
+                val effectiveDefence = applyStageMultiplier(data.actualDefence, defenceStage)
+                val modifiers = mutableListOf<String>()
+                if (defenceStage != 0) {
+                    modifiers.add(if (defenceStage > 0) "+$defenceStage" else "$defenceStage")
+                }
+                val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
+                lines.add(listOf("Defense: $effectiveDefence$modText" to TOOLTIP_DEFENSE))
             }
 
-            // Si en el futuro tienes habilidades/items que afecten defensa especial,
-            // aquí es donde se añaden (ejemplo comentado)
-            /*
-            val abilityMult = getAbilitySpecialDefenseMultiplier(data.abilityName, ...)
-            if (abilityMult != 1.0) modifiers.add(data.abilityName)
-
-            if (itemName != null && getItemSpecialDefenseMultiplier(itemName) != 1.0 && !itemConsumed) {
-                modifiers.add(itemName)
+            // Special Attack
+            if (data.isPlayerPokemon && data.actualSpecialAttack != null) {
+                val specialAttackStage = data.statChanges[BattleStateTracker.BattleStat.SPECIAL_ATTACK] ?: 0
+                val effectiveSpecialAttack = applyStageMultiplier(data.actualSpecialAttack, specialAttackStage)
+                val modifiers = mutableListOf<String>()
+                if (specialAttackStage != 0) modifiers.add(if (specialAttackStage > 0) "+$specialAttackStage" else "$specialAttackStage")
+                val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
+                lines.add(listOf("Sp. Atk: $effectiveSpecialAttack$modText" to TOOLTIP_SPECIAL_ATTACK))
             }
-            */
 
-            val modText = if (modifiers.isNotEmpty())
-                " (${modifiers.joinToString(", ")})"
-            else ""
-
-            lines.add(
-                listOf(
-                    "Special Defense: $effectiveSpecialDefence$modText" to TOOLTIP_SPECIAL_DEFENSE
-                )
-            )
+            // Special Defense
+            if (data.isPlayerPokemon && data.actualSpecialDefence != null) {
+                val specialDefenceStage = data.statChanges[BattleStateTracker.BattleStat.SPECIAL_DEFENSE] ?: 0
+                val effectiveSpecialDefence = applyStageMultiplier(data.actualSpecialDefence, specialDefenceStage)
+                val modifiers = mutableListOf<String>()
+                if (specialDefenceStage != 0) {
+                    modifiers.add(if (specialDefenceStage > 0) "+$specialDefenceStage" else "$specialDefenceStage")
+                }
+                val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
+                lines.add(listOf("Sp. Def: $effectiveSpecialDefence$modText" to TOOLTIP_SPECIAL_DEFENSE))
+            }
         }
 
-        // Speed tier display with ability/status/item modifiers
+        // Speed tier display with ability/status/item modifiers (always shown)
         val speedStage = data.statChanges[BattleStateTracker.BattleStat.SPEED] ?: 0
         if (data.isPlayerPokemon && data.actualSpeed != null) {
             // Player's Pokemon: show effective speed with all modifiers
@@ -2187,90 +2106,15 @@ object TeamIndicatorUI {
         matrices.pop()
     }
 
-    private fun calculateOpponentStatRange(
-        level: Int,
-        battleStat: BattleStateTracker.BattleStat,
-        defenceStage: Int,
-        form: FormData?,
-        nature: Nature?
-    ): RangeResult? {
-
-        val baseStat = when (battleStat) {
-            BattleStateTracker.BattleStat.DEFENSE ->
-                form?.baseStats?.get(Stats.DEFENCE)
-            BattleStateTracker.BattleStat.SPECIAL_DEFENSE ->
-                form?.baseStats?.get(Stats.SPECIAL_DEFENCE)
-            else -> null
-        } ?: return null
-
-        // Pokémon standard assumptions
-        val minIV = 0
-        val maxIV = 31
-        val minEV = 0
-        val maxEV = 252
-
-        fun calculateStat(base: Int, iv: Int, ev: Int): Int {
-            return (((2 * base + iv + (ev / 4)) * level) / 100) + 5
-        }
-
-        val minStat = calculateStat(baseStat, minIV, minEV)
-        val maxStat = calculateStat(baseStat, maxIV, maxEV)
-
-        val effectiveMin = calculateEffectiveStat(minStat, defenceStage, battleStat, nature  )
-        val effectiveMax = calculateEffectiveStat(maxStat, defenceStage, battleStat, nature )
-
-
-
-        return RangeResult(effectiveMin, effectiveMax)
+    /**
+     * Apply stat stage multiplier to a stat value.
+     * Uses the standard Pokemon formula: (2 + stage) / 2 for positive, 2 / (2 - stage) for negative.
+     * Note: For player Pokemon, the input stat already includes nature from Cobblemon.
+     */
+    private fun applyStageMultiplier(stat: Int, stage: Int): Int {
+        val multiplier = getStageMultiplier(stage)
+        return (stat * multiplier).toInt()
     }
-
-    private fun calculateEffectiveStat(
-        actualStat: Int,
-        stage: Int,
-        stat: BattleStateTracker.BattleStat,
-        nature: Nature?
-    ): Int {
-
-        val stageMultipliers = arrayOf(
-            1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0
-        )
-
-        val stageMultiplier = if (stage >= 0) {
-            stageMultipliers[stage.coerceAtMost(6)]
-        } else {
-            1.0 / stageMultipliers[(-stage).coerceAtMost(6)]
-        }
-
-        val natureMultiplier = getNatureMultiplier(nature, stat)
-
-        return (actualStat * stageMultiplier * natureMultiplier).toInt()
-    }
-
-
-    private val BATTLESTAT_TO_NATURESTAT = mapOf(
-        BattleStateTracker.BattleStat.ATTACK to Stats.ATTACK,
-        BattleStateTracker.BattleStat.SPECIAL_ATTACK to Stats.SPECIAL_ATTACK,
-        BattleStateTracker.BattleStat.DEFENSE to Stats.DEFENCE,
-        BattleStateTracker.BattleStat.SPECIAL_DEFENSE to Stats.SPECIAL_DEFENCE,
-        BattleStateTracker.BattleStat.SPEED to Stats.SPEED
-    )
-
-
-    private fun getNatureMultiplier(
-        nature: Nature?,
-        stat: BattleStateTracker.BattleStat
-    ): Double {
-        val natureStat = BATTLESTAT_TO_NATURESTAT[stat] ?: return 1.0
-        if (nature == null) return 1.0
-
-        return when {
-            nature.increasedStat == natureStat -> 1.1
-            nature.decreasedStat == natureStat -> 0.9
-            else -> 1.0
-        }
-    }
-
-
 
     /**
      * Draw a rounded tooltip background with border.

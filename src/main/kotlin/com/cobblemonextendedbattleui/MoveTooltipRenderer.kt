@@ -261,8 +261,8 @@ object MoveTooltipRenderer {
             val baseCritRatio = template.critRatio
 
             val hasSuperLuck = getPlayerPokemonAbility() == "superluck"
-            val heldItemName = getPlayerPokemonHeldItem(true)
-            val hasCritItem = heldItemName == "cobblemon:scope_lens" || heldItemName == "cobblemon:razor_claw"
+            val heldItemId = getPlayerPokemonHeldItemId()
+            val hasCritItem = heldItemId == "cobblemon:scope_lens" || heldItemId == "cobblemon:razor_claw"
 
             var critBonus = 0
             val boostSources = mutableListOf<String>()
@@ -275,29 +275,33 @@ object MoveTooltipRenderer {
             if (hasCritItem) {
                 critBonus++
                 boostSources.add(
-                    if (heldItemName == "cobblemon:scope_lens") "Scope Lens" else "Razor Claw"
+                    if (heldItemId == "cobblemon:scope_lens") "Scope Lens" else "Razor Claw"
                 )
             }
 
-            val effectiveCritRatio = (baseCritRatio + critBonus).coerceAtMost(4.0)
+            // Only show crit rate if: setting enabled, move has high crit, or there are boosts
+            val shouldShowCrit = PanelConfig.showBaseCritRate || baseCritRatio > 1.0 || critBonus > 0
 
-            val baseCritPercent = critRatioToPercent(baseCritRatio)
-            val effectiveCritPercent = critRatioToPercent(effectiveCritRatio)
+            if (shouldShowCrit) {
+                val effectiveCritRatio = (baseCritRatio + critBonus).coerceAtMost(4.0)
 
-            // Decide label
-            val critLabel = if (baseCritRatio > 1.0) "High Crit" else "Crit"
+                val baseCritPercent = critRatioToPercent(baseCritRatio)
+                val effectiveCritPercent = critRatioToPercent(effectiveCritRatio)
 
-            // Always show base crit
-            val line = mutableListOf<Pair<String, Int>>()
-            line.add("$critLabel: $baseCritPercent" to COLOR_CRIT)
+                // Decide label
+                val critLabel = if (baseCritRatio > 1.0) "High Crit" else "Crit"
 
-            // If boosted, show improvement
-            if (critBonus > 0) {
-                val boostText = boostSources.joinToString(" + ")
-                line.add(" ($boostText → $effectiveCritPercent)" to SUPER_EFFECTIVE_2X)
+                val line = mutableListOf<Pair<String, Int>>()
+                line.add("$critLabel: $baseCritPercent" to COLOR_CRIT)
+
+                // If boosted, show improvement
+                if (critBonus > 0) {
+                    val boostText = boostSources.joinToString(" + ")
+                    line.add(" ($boostText → $effectiveCritPercent)" to SUPER_EFFECTIVE_2X)
+                }
+
+                lines.add(line)
             }
-
-            lines.add(line)
         }
 
 
@@ -478,11 +482,42 @@ object MoveTooltipRenderer {
     }
 
     /**
-     * Get the held item name of the player's active Pokemon.
-     * Returns the Showdown ID for the item (e.g., "charcoal", "lifeorb").
-     * Returns null if the item is empty or has been consumed (e.g., gems after use).
+     * Get the held item's full registry ID (e.g., "cobblemon:scope_lens").
+     * Returns null if the item is empty or has been consumed.
      */
-    private fun getPlayerPokemonHeldItem(id: Boolean): String? {
+    private fun getPlayerPokemonHeldItemId(): String? {
+        val heldItem = getPlayerPokemonHeldItemStack() ?: return null
+        return heldItem.item.toString()
+    }
+
+    /**
+     * Get the held item name in Showdown format (e.g., "charcoal", "lifeorb").
+     * Returns null if the item is empty or has been consumed.
+     */
+    private fun getPlayerPokemonHeldItemShowdownName(): String? {
+        val heldItem = getPlayerPokemonHeldItemStack() ?: return null
+
+        // First try to get the Showdown ID from the HELD_ITEM_EFFECT component
+        // This handles remapped items like charcoal_stick -> charcoal
+        val heldItemEffect = heldItem.get(CobblemonItemComponents.HELD_ITEM_EFFECT)
+        if (heldItemEffect != null) {
+            // Check if the item has been consumed (e.g., gems after use)
+            if (heldItemEffect.consumed) {
+                return null
+            }
+            return heldItemEffect.showdownId
+        }
+
+        // Fallback: get from registry path and remove underscores (Showdown format)
+        val registryPath = Registries.ITEM.getId(heldItem.item).path
+        return registryPath.replace("_", "")
+    }
+
+    /**
+     * Get the held item stack of the player's active Pokemon.
+     * Returns null if the item is empty or has been consumed/knocked off/stolen.
+     */
+    private fun getPlayerPokemonHeldItemStack(): net.minecraft.item.ItemStack? {
         val battle = CobblemonClient.battle ?: return null
         val playerUUID = MinecraftClient.getInstance().player?.uuid ?: return null
         val playerSide = if (battle.side1.actors.any { it.uuid == playerUUID }) battle.side1 else battle.side2
@@ -503,21 +538,7 @@ object MoveTooltipRenderer {
         val heldItem = partyPokemon.heldItem()
         if (heldItem.isEmpty) return null
 
-        // First try to get the Showdown ID from the HELD_ITEM_EFFECT component
-        // This handles remapped items like charcoal_stick -> charcoal
-        val heldItemEffect = heldItem.get(CobblemonItemComponents.HELD_ITEM_EFFECT)
-        if (heldItemEffect != null) {
-            // Check if the item has been consumed (e.g., gems after use)
-            if (heldItemEffect.consumed) {
-                return null
-            }
-            return heldItemEffect.showdownId
-        }
-
-        // Fallback: get from registry path and remove underscores (Showdown format)
-        val registryPath = Registries.ITEM.getId(heldItem.item).path
-        return if (id) heldItem.item.toString()
-        else registryPath.replace("_", "")
+        return heldItem
     }
 
     /**
@@ -526,8 +547,7 @@ object MoveTooltipRenderer {
      * @return The item boost info if applicable, null otherwise
      */
     private fun getHeldItemPowerBoost(moveType: String): ItemPowerBoostParser.ItemPowerBoost? {
-        val heldItemName = getPlayerPokemonHeldItem(false) ?: return null
-        //CobblemonExtendedBattleUI.LOGGER.info("Held Item Name: $heldItemName")
+        val heldItemName = getPlayerPokemonHeldItemShowdownName() ?: return null
         val boost = ItemPowerBoostParser.getBoostForItem(heldItemName) ?: return null
         // Check if boost applies to this move type
         return when {

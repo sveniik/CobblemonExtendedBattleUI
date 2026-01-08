@@ -6,6 +6,7 @@
 
   "cobblemonextendedbattleui.config.title": "Cobblemon Extended Battle UI Settings",
   "cobblemonextendedbattleui.config.category.features": "Features",
+  "cobblemonextendedbattleui.config.category.tooltipOptions": "Tooltip Options",
 
   "cobblemonextendedbattleui.config.enableTeamIndicators": "Team Indicators",
   "cobblemonextendedbattleui.config.enableTeamIndicators.tooltip": "Show Pokeball team indicators under health bars during battle",
@@ -17,5 +18,14 @@
   "cobblemonextendedbattleui.config.enableBattleLog.tooltip": "Show custom battle log widget with damage percentages",
 
   "cobblemonextendedbattleui.config.enableMoveTooltips": "Move Tooltips",
-  "cobblemonextendedbattleui.config.enableMoveTooltips.tooltip": "Show tooltips with type effectiveness when hovering over moves. Disable if using Cobblemon Move Inspector."
+  "cobblemonextendedbattleui.config.enableMoveTooltips.tooltip": "Show tooltips with type effectiveness when hovering over moves. Disable if using Cobblemon Move Inspector.",
+
+  "cobblemonextendedbattleui.config.showTeraType": "Show Tera Type",
+  "cobblemonextendedbattleui.config.showTeraType.tooltip": "Display Tera Type in Pokemon tooltips when known",
+
+  "cobblemonextendedbattleui.config.showStatRanges": "Show Stat Values",
+  "cobblemonextendedbattleui.config.showStatRanges.tooltip": "Display Attack, Defense, Sp. Atk, and Sp. Def in Pokemon tooltips (Speed is always shown)",
+
+  "cobblemonextendedbattleui.config.showBaseCritRate": "Show Base Crit Rate",
+  "cobblemonextendedbattleui.config.showBaseCritRate.tooltip": "Always show crit rate in move tooltips. When disabled, only shows crit rate for high-crit moves or when boosted by items/abilities."
 }

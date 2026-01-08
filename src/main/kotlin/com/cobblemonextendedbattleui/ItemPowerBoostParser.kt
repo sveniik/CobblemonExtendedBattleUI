@@ -90,9 +90,6 @@ object ItemPowerBoostParser {
                         }
                         val finalId = finalItemId[itemId] ?: itemId
 
-                        //CobblemonExtendedBattleUI.LOGGER.info("Found power-boosting item: $finalId boosts $type " +
-                        //        "moves" + " by x$multiplier itemId (from $itemId)")
-
                         result[finalId] = ItemPowerBoost(
                             itemId = finalId,
                             displayName = displayName,

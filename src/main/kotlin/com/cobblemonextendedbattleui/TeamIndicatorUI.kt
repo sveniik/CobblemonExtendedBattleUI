@@ -21,6 +21,7 @@ import com.cobblemon.mod.common.pokemon.FormData
 import com.cobblemon.mod.common.pokemon.Nature
 import com.cobblemon.mod.common.pokemon.Pokemon
 import com.cobblemon.mod.common.pokemon.RenderablePokemon
+import com.cobblemon.mod.common.pokemon.Species
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.util.InputUtil
@@ -188,6 +189,7 @@ object TeamIndicatorUI {
      */
     data class TooltipData(
         val pokemonName: String,
+        val pokemonId: Identifier?,
         val hpPercent: Float,
         val statusCondition: Status?,
         val isKO: Boolean,
@@ -492,13 +494,13 @@ object TeamIndicatorUI {
      * Returns the max multiplier if any ability could apply, 1.0 otherwise.
      */
     private fun getMaxPossibleAbilitySpeedMultiplier(
-        speciesName: String,
+        pokemonId: Identifier,
         weather: BattleStateTracker.Weather?,
         terrain: BattleStateTracker.Terrain?,
         hasStatus: Boolean,
         itemConsumed: Boolean
     ): Double {
-        val species = PokemonSpecies.getByName(speciesName) ?: return 1.0
+        val species = PokemonSpecies.getByIdentifier(pokemonId) ?: return 1.0
         var maxMultiplier = 1.0
 
         // Get all possible abilities for this species
@@ -554,14 +556,14 @@ object TeamIndicatorUI {
      * Accounts for possible abilities that could boost speed in current conditions.
      */
     private fun calculateOpponentSpeedRange(
-        speciesName: String,
+        pokemonId: Identifier,
         level: Int,
         speedStage: Int,
         status: Status?,
         knownItem: BattleStateTracker.TrackedItem?,
         form: FormData?
     ): SpeedRangeResult? {
-        val species = PokemonSpecies.getByName(speciesName) ?: return null
+        val species = PokemonSpecies.getByIdentifier(pokemonId) ?: return null
         val baseSpeed = if (form != null) form.baseStats[Stats.SPEED] ?: return null
         else species.baseStats[Stats.SPEED] ?: return null
 
@@ -582,7 +584,7 @@ object TeamIndicatorUI {
 
         // For max speed: check if any ability could boost speed
         val maxAbilityMultiplier =
-            getMaxPossibleAbilitySpeedMultiplier(speciesName, weather, terrain, hasStatus, itemConsumed)
+            getMaxPossibleAbilitySpeedMultiplier(pokemonId, weather, terrain, hasStatus, itemConsumed)
 
         // For paralysis: Quick Feet could negate the penalty AND give 1.5x
         val maxStatusMultiplier = if (status == Statuses.PARALYSIS) {
@@ -1657,6 +1659,8 @@ object TeamIndicatorUI {
         battlePokemon: Pokemon?,
         isPlayerPokemon: Boolean
     ): TooltipData {
+        val pokemonId = trackedPokemon?.speciesIdentifier
+            ?: battlePokemon?.species?.resourceIdentifier
         val name = battlePokemon?.getDisplayName()?.string
             ?: getPokemonNameFromUuid(uuid)
             ?: trackedPokemon?.displayName
@@ -1783,7 +1787,10 @@ object TeamIndicatorUI {
         }
 
         // Get types from species (name must be lowercase for registry lookup)
-        val species = speciesName?.let { PokemonSpecies.getByName(it.lowercase()) }
+        val species = if (trackedPokemon?.speciesIdentifier != null) PokemonSpecies.getByIdentifier(trackedPokemon.speciesIdentifier!!)
+        else if (battlePokemon != null) PokemonSpecies.getByIdentifier(battlePokemon.species.resourceIdentifier)
+        else null
+
         val primaryType = if (battlePokemon != null) battlePokemon.form.primaryType
         else {
             if (trackedPokemon?.form != null) trackedPokemon.form?.primaryType
@@ -1801,6 +1808,7 @@ object TeamIndicatorUI {
 
         return TooltipData(
             pokemonName = name,
+            pokemonId = pokemonId,
             hpPercent = hpPercent,
             statusCondition = trackedPokemon?.status ?: battlePokemon?.status?.status,
             isKO = trackedPokemon?.isKO ?: isPokemonKO(uuid),
@@ -2105,10 +2113,10 @@ object TeamIndicatorUI {
             }
             val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
             lines.add(listOf("Speed: $effectiveSpeed$modText" to TOOLTIP_SPEED))
-        } else if (data.speciesName != null && data.level != null) {
+        } else if (data.pokemonId != null && data.level != null) {
             // Opponent: show min-max speed range with ability considerations
             val speedRange = calculateOpponentSpeedRange(
-                data.speciesName, data.level, speedStage, data.statusCondition, data.item, data.form
+                data.pokemonId, data.level, speedStage, data.statusCondition, data.item, data.form
             )
             if (speedRange != null) {
                 val modifiers = mutableListOf<String>()

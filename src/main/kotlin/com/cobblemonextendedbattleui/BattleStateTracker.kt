@@ -1,5 +1,8 @@
 package com.cobblemonextendedbattleui
 
+import com.cobblemon.mod.common.api.pokemon.PokemonSpecies
+import com.cobblemon.mod.common.pokemon.FormData
+import net.minecraft.util.Identifier
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -38,6 +41,402 @@ object BattleStateTracker {
     fun setSpectating(spectating: Boolean) {
         isSpectating = spectating
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Spectating mode = $spectating")
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Dynamic Type Tracking
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Tracks types that can change mid-battle via moves (Soak, Burn Up, Trick-or-Treat)
+     * or form changes.
+     *
+     * @param primaryType Current primary type name (null = "???" lost type)
+     * @param secondaryType Current secondary type name (null = no secondary OR lost)
+     * @param hasLostPrimaryType True if primary was lost (show "???")
+     * @param addedTypes Types added by moves (Trick-or-Treat adds Ghost, Forest's Curse adds Grass)
+     * @param originalPrimaryType For reference/reversion
+     * @param originalSecondaryType For reference/reversion
+     */
+    data class DynamicTypeState(
+        val primaryType: String?,
+        val secondaryType: String?,
+        val hasLostPrimaryType: Boolean = false,
+        val addedTypes: List<String> = emptyList(),
+        val originalPrimaryType: String?,
+        val originalSecondaryType: String?
+    )
+
+    // Maps UUID -> current dynamic type state
+    private val dynamicTypes = ConcurrentHashMap<UUID, DynamicTypeState>()
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Form Change Tracking
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Tracks the current form of a Pokemon that can change mid-battle.
+     * @param currentForm The form name (e.g., "Mega", "Zen", "Sunny", "School", "Ash-Greninja")
+     * @param originalForm The base form name (null = default form)
+     * @param isMega True if this is a Mega Evolution
+     * @param isTemporary True if the form reverts automatically (weather forms, Zen Mode on HP)
+     */
+    data class FormState(
+        val currentForm: String,
+        val originalForm: String? = null,
+        val isMega: Boolean = false,
+        val isTemporary: Boolean = false
+    )
+
+    // Maps UUID -> current form state (null = default form)
+    private val pokemonForms = ConcurrentHashMap<UUID, FormState>()
+
+    // Maps UUID -> species identifier (for form lookup when only name is available)
+    private val pokemonSpeciesIds = ConcurrentHashMap<UUID, Identifier>()
+
+    /**
+     * Initialize dynamic types when a Pokemon enters battle.
+     * Sets the original types for reference and starts tracking.
+     */
+    fun initializeDynamicTypes(uuid: UUID, primaryType: String?, secondaryType: String?) {
+        dynamicTypes[uuid] = DynamicTypeState(
+            primaryType = primaryType,
+            secondaryType = secondaryType,
+            hasLostPrimaryType = false,
+            addedTypes = emptyList(),
+            originalPrimaryType = primaryType,
+            originalSecondaryType = secondaryType
+        )
+        CobblemonExtendedBattleUI.LOGGER.debug(
+            "BattleStateTracker: Initialized dynamic types for $uuid - primary=$primaryType, secondary=$secondaryType"
+        )
+    }
+
+    /**
+     * Set complete type replacement for a Pokemon (Soak, form changes).
+     * Replaces all types with new values.
+     * If both types are null, attempts to look up from species data as fallback.
+     */
+    fun setTypeReplacement(pokemonName: String, newPrimaryType: String?, newSecondaryType: String?, preferAlly: Boolean?) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for type replacement")
+            return
+        }
+
+        // If both types are null, try to look up from species as fallback
+        // This prevents creating states with unknown types
+        var effectivePrimaryType = newPrimaryType
+        var effectiveSecondaryType = newSecondaryType
+        if (effectivePrimaryType == null && effectiveSecondaryType == null) {
+            val speciesId = pokemonSpeciesIds[uuid]
+            val species = speciesId?.let { PokemonSpecies.getByIdentifier(it) }
+            if (species != null) {
+                effectivePrimaryType = species.primaryType.name
+                effectiveSecondaryType = species.secondaryType?.name
+                CobblemonExtendedBattleUI.LOGGER.debug(
+                    "BattleStateTracker: Type replacement for $pokemonName - using species fallback: $effectivePrimaryType/$effectiveSecondaryType"
+                )
+            }
+        }
+
+        val existing = dynamicTypes[uuid]
+
+        // If there's an existing state with hasLostPrimaryType=true (from Burn Up, etc.),
+        // don't let a generic type change message overwrite it - the type loss should persist
+        if (existing?.hasLostPrimaryType == true) {
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "BattleStateTracker: Ignoring type replacement for $pokemonName - hasLostPrimaryType is already true"
+            )
+            return
+        }
+
+        dynamicTypes[uuid] = DynamicTypeState(
+            primaryType = effectivePrimaryType,
+            secondaryType = effectiveSecondaryType,
+            hasLostPrimaryType = false,
+            addedTypes = emptyList(),  // Type replacement clears added types
+            originalPrimaryType = existing?.originalPrimaryType ?: effectivePrimaryType,
+            originalSecondaryType = existing?.originalSecondaryType ?: effectiveSecondaryType
+        )
+        CobblemonExtendedBattleUI.LOGGER.debug(
+            "BattleStateTracker: Type replacement for $pokemonName - primary=$effectivePrimaryType, secondary=$effectiveSecondaryType"
+        )
+    }
+
+    /**
+     * Mark a type as lost (Burn Up loses Fire type).
+     * If the lost type is primary, sets hasLostPrimaryType to show "???".
+     * If types aren't tracked yet, initializes from species data first.
+     */
+    fun loseType(pokemonName: String, typeName: String, preferAlly: Boolean?) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for type loss")
+            return
+        }
+
+        // If types aren't tracked yet, initialize from species
+        var existing = dynamicTypes[uuid]
+
+        if (existing == null) {
+            val speciesId = pokemonSpeciesIds[uuid]
+            val species = speciesId?.let { PokemonSpecies.getByIdentifier(it) }
+
+            if (species != null) {
+                val primaryType = species.primaryType.name
+                val secondaryType = species.secondaryType?.name
+                existing = DynamicTypeState(
+                    primaryType = primaryType,
+                    secondaryType = secondaryType,
+                    hasLostPrimaryType = false,
+                    originalPrimaryType = primaryType,
+                    originalSecondaryType = secondaryType
+                )
+                dynamicTypes[uuid] = existing
+                CobblemonExtendedBattleUI.LOGGER.debug(
+                    "BattleStateTracker: Initialized types for $pokemonName: $primaryType/$secondaryType"
+                )
+            } else {
+                // Species unknown - still create a minimal dynamic state to track the lost type
+                // This handles cases where Burn Up message arrives before species is registered
+                existing = DynamicTypeState(
+                    primaryType = typeName,  // Assume the lost type was the primary (true for Burn Up/Fire, Double Shock/Electric)
+                    secondaryType = null,
+                    hasLostPrimaryType = false,
+                    originalPrimaryType = typeName,
+                    originalSecondaryType = null
+                )
+                dynamicTypes[uuid] = existing
+            }
+        }
+
+        val typeNameLower = typeName.lowercase()
+        val existingPrimaryLower = existing.primaryType?.lowercase()
+        val existingSecondaryLower = existing.secondaryType?.lowercase()
+        val isPrimaryLost = existingPrimaryLower == typeNameLower
+        val isSecondaryLost = existingSecondaryLower == typeNameLower
+
+        if (isPrimaryLost || isSecondaryLost) {
+            val newState = existing.copy(
+                primaryType = if (isPrimaryLost) null else existing.primaryType,
+                secondaryType = if (isSecondaryLost) null else existing.secondaryType,
+                hasLostPrimaryType = isPrimaryLost || existing.hasLostPrimaryType
+            )
+            dynamicTypes[uuid] = newState
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "BattleStateTracker: $pokemonName lost type $typeName - hasLostPrimaryType=${newState.hasLostPrimaryType}"
+            )
+        } else if (existing.primaryType == null && existing.secondaryType == null && !existing.hasLostPrimaryType) {
+            // Edge case: existing state has null types (from failed Transform type update)
+            // Since we know this Pokemon just used a type-loss move, mark the primary type as lost
+            // This ensures "???" is displayed even if we couldn't determine original types
+            val newState = existing.copy(
+                hasLostPrimaryType = true
+            )
+            dynamicTypes[uuid] = newState
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "BattleStateTracker: $pokemonName has unknown types but used type-loss move - marking hasLostPrimaryType=true"
+            )
+        } else {
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "BattleStateTracker: Type '$typeName' not found on $pokemonName (types: ${existing.primaryType}/${existing.secondaryType})"
+            )
+        }
+    }
+
+    /**
+     * Add a type to a Pokemon (Trick-or-Treat adds Ghost, Forest's Curse adds Grass).
+     * Added types are shown after the Pokemon's normal types.
+     */
+    fun addType(pokemonName: String, typeName: String, preferAlly: Boolean?) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for add type")
+            return
+        }
+
+        val existing = dynamicTypes[uuid] ?: return
+        val normalizedName = typeName.replaceFirstChar { it.uppercase() }
+
+        // Don't add if already present in normal types or added types
+        if (existing.primaryType?.equals(normalizedName, ignoreCase = true) == true ||
+            existing.secondaryType?.equals(normalizedName, ignoreCase = true) == true ||
+            existing.addedTypes.any { it.equals(normalizedName, ignoreCase = true) }) {
+            return
+        }
+
+        dynamicTypes[uuid] = existing.copy(
+            addedTypes = existing.addedTypes + normalizedName
+        )
+        CobblemonExtendedBattleUI.LOGGER.debug(
+            "BattleStateTracker: $pokemonName gained type $normalizedName"
+        )
+    }
+
+    /**
+     * Get current dynamic type state for a Pokemon.
+     * Returns null if no dynamic state exists (use form types instead).
+     */
+    fun getDynamicTypes(uuid: UUID): DynamicTypeState? = dynamicTypes[uuid]
+
+    /**
+     * Clear dynamic types for a Pokemon (on switch, NOT on faint - persist for info).
+     */
+    fun clearDynamicTypes(uuid: UUID) {
+        if (dynamicTypes.remove(uuid) != null) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared dynamic types for $uuid")
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Form Change CRUD Methods
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Set the current form for a Pokemon.
+     * Called when form change messages are detected.
+     */
+    fun setCurrentForm(pokemonName: String, formName: String, isMega: Boolean = false, isTemporary: Boolean = false, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for form change")
+            return
+        }
+
+        val existing = pokemonForms[uuid]
+        pokemonForms[uuid] = FormState(
+            currentForm = formName,
+            originalForm = existing?.originalForm,  // Preserve original if already tracked
+            isMega = isMega,
+            isTemporary = isTemporary
+        )
+        CobblemonExtendedBattleUI.LOGGER.debug(
+            "BattleStateTracker: $pokemonName form changed to '$formName' (mega=$isMega, temporary=$isTemporary)"
+        )
+    }
+
+    /**
+     * Clear form state (revert to default form).
+     * Called when temporary forms end or Pokemon switches out.
+     */
+    fun clearCurrentForm(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return
+        if (pokemonForms.remove(uuid) != null) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName reverted to base form")
+        }
+    }
+
+    /**
+     * Get current form state for a Pokemon.
+     * Returns null if Pokemon is in its default form.
+     */
+    fun getCurrentForm(uuid: UUID): FormState? = pokemonForms[uuid]
+
+    /**
+     * Get current form by name.
+     */
+    fun getCurrentFormByName(pokemonName: String, preferAlly: Boolean? = null): FormState? {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return null
+        return pokemonForms[uuid]
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Form Change Type Updates
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Convert form name from battle messages to Cobblemon aspect string.
+     * Form names come from messages like "Mega Evolution" -> "mega",
+     * "Zen Mode" -> "zen", "School Form" -> "school", etc.
+     */
+    fun formNameToAspect(formName: String): String {
+        return formName
+            .lowercase()
+            .replace("-", "")
+            .replace(" ", "")
+            .replace("form", "")
+            .replace("mode", "")
+            .trim()
+    }
+
+    /**
+     * Update types and return FormData when a form change occurs.
+     * Called after setCurrentForm() to propagate type changes.
+     *
+     * @param pokemonName Name of the Pokemon
+     * @param speciesId Identifier for species lookup
+     * @param formName The form name from the battle message
+     * @param preferAlly Hint for mirror match disambiguation
+     * @return FormData if found, null otherwise
+     */
+    fun updateTypesForFormChange(
+        pokemonName: String,
+        speciesId: Identifier?,
+        formName: String,
+        preferAlly: Boolean? = null
+    ): FormData? {
+        if (speciesId == null) return null
+
+        val species = PokemonSpecies.getByIdentifier(speciesId) ?: return null
+        val aspect = formNameToAspect(formName)
+        val form = species.getForm(setOf(aspect))
+
+        // Update dynamic types with the new form's types
+        val primaryType = form.primaryType?.name
+        val secondaryType = form.secondaryType?.name
+
+        setTypeReplacement(pokemonName, primaryType, secondaryType, preferAlly)
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Form change type update for $pokemonName to $formName - types: $primaryType/$secondaryType")
+
+        return form
+    }
+
+    /**
+     * Restore a Pokemon's original types (used when form reverts or Pokemon switches out).
+     */
+    fun restoreOriginalTypes(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return
+        restoreOriginalTypes(uuid)
+    }
+
+    /**
+     * Restore a Pokemon's original types by UUID.
+     * Called when a Pokemon switches out - type changes from Burn Up, Soak, etc. are reset.
+     */
+    fun restoreOriginalTypes(uuid: UUID) {
+        val state = dynamicTypes[uuid] ?: return
+
+        dynamicTypes[uuid] = state.copy(
+            primaryType = state.originalPrimaryType,
+            secondaryType = state.originalSecondaryType,
+            hasLostPrimaryType = false,
+            addedTypes = emptyList()
+        )
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Restored original types for UUID $uuid")
+    }
+
+    /**
+     * Get the species identifier for a tracked Pokemon by UUID.
+     */
+    fun getSpeciesId(uuid: UUID): Identifier? = pokemonSpeciesIds[uuid]
+
+    /**
+     * Get the species identifier for a tracked Pokemon by name.
+     * Used when we need to look up form data but only have the name.
+     */
+    fun getSpeciesIdByName(pokemonName: String, preferAlly: Boolean? = null): Identifier? {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return null
+        return pokemonSpeciesIds[uuid]
+    }
+
+    /**
+     * Register a species ID for a Pokemon.
+     * Called when a Pokemon is tracked with known species.
+     * Only registers if not already present (called every frame, so avoid redundant work).
+     */
+    fun registerSpeciesId(uuid: UUID, speciesId: Identifier) {
+        if (!pokemonSpeciesIds.containsKey(uuid)) {
+            pokemonSpeciesIds[uuid] = speciesId
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Registered species ID $speciesId for $uuid")
+        }
     }
 
     fun checkBattleChanged(battleId: UUID) {
@@ -344,6 +743,9 @@ object BattleStateTracker {
         trackedMoves.clear()
         pressurePokemon.clear()
         revealedAbilities.clear()
+        dynamicTypes.clear()
+        pokemonForms.clear()
+        pokemonSpeciesIds.clear()
         BattleMessageInterceptor.clearMoveTracking()
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared all state")
     }
@@ -816,6 +1218,7 @@ object BattleStateTracker {
         HELD(null),                    // Item revealed, still held
         KNOCKED_OFF("knocked off"),    // Item was knocked off by Knock Off
         STOLEN("stolen"),              // Item was stolen by Thief/Covet
+        SWAPPED("swapped"),            // Item was swapped away by Trick/Switcheroo
         CONSUMED("used")               // Item was consumed (berry, Focus Sash, etc.)
     }
 
@@ -861,7 +1264,7 @@ object BattleStateTracker {
                     CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName revealed item $itemName")
                 }
             }
-            ItemStatus.KNOCKED_OFF, ItemStatus.STOLEN, ItemStatus.CONSUMED -> {
+            ItemStatus.KNOCKED_OFF, ItemStatus.STOLEN, ItemStatus.SWAPPED, ItemStatus.CONSUMED -> {
                 // Update existing or create new with removal status
                 pokemonItems[uuid] = TrackedItem(
                     itemName,
@@ -912,6 +1315,58 @@ object BattleStateTracker {
         }
 
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $toPokemon stole $itemName from $fromPokemon")
+    }
+
+    /**
+     * Handle item obtained via Trick/Switcheroo.
+     * Sets the new item as HELD, replacing any existing item tracking.
+     * The old item's stat effects will no longer apply since we track the new item.
+     */
+    fun receiveItemViaTrick(pokemonName: String, newItemName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for Trick item swap")
+            return
+        }
+
+        val effectiveTurn = maxOf(1, currentTurn)
+        val existingItem = pokemonItems[uuid]
+
+        // Log what happened (for debugging)
+        if (existingItem != null && existingItem.status == ItemStatus.HELD) {
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "BattleStateTracker: $pokemonName's ${existingItem.name} swapped for $newItemName via Trick"
+            )
+        } else {
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "BattleStateTracker: $pokemonName obtained $newItemName via Trick"
+            )
+        }
+
+        // Set the new item as held (overwrites any previous item)
+        pokemonItems[uuid] = TrackedItem(newItemName, ItemStatus.HELD, effectiveTurn)
+    }
+
+    /**
+     * Mark an item as swapped away (lost via Trick/Switcheroo without knowing the new item).
+     * Used when we know an item was lost but don't have info about what was received.
+     */
+    fun markItemSwapped(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return
+
+        val effectiveTurn = maxOf(1, currentTurn)
+        val existingItem = pokemonItems[uuid] ?: return
+
+        if (existingItem.status == ItemStatus.HELD) {
+            pokemonItems[uuid] = TrackedItem(
+                existingItem.name,
+                ItemStatus.SWAPPED,
+                existingItem.revealTurn,
+                removalTurn = effectiveTurn
+            )
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "BattleStateTracker: $pokemonName's ${existingItem.name} marked as swapped away"
+            )
+        }
     }
 
     // Note: Items are NOT cleared on switch/faint - they persist for competitive info.
@@ -1052,13 +1507,19 @@ object BattleStateTracker {
             CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for ability tracking")
             return
         }
+        setRevealedAbility(uuid, abilityName)
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName ability revealed: $abilityName")
+    }
 
+    /**
+     * Set the revealed ability for a Pokemon by UUID.
+     */
+    fun setRevealedAbility(uuid: UUID, abilityName: String) {
         // Normalize ability name (capitalize each word)
         val normalizedName = abilityName.split(" ", "_", "-")
             .joinToString(" ") { it.replaceFirstChar { c -> c.uppercase() } }
 
         revealedAbilities[uuid] = normalizedName
-        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: $pokemonName ability revealed: $normalizedName")
     }
 
     /**
@@ -1072,6 +1533,15 @@ object BattleStateTracker {
     fun getRevealedAbilityByName(pokemonName: String, preferAlly: Boolean? = null): String? {
         val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: return null
         return revealedAbilities[uuid]
+    }
+
+    /**
+     * Clear the revealed ability for a Pokemon (e.g., when Transform reverts).
+     */
+    fun clearRevealedAbility(uuid: UUID) {
+        if (revealedAbilities.remove(uuid) != null) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared revealed ability for UUID $uuid")
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1119,12 +1589,27 @@ object BattleStateTracker {
     /**
      * Resolve Pokemon name to UUID. For mirror matches, disambiguates via:
      * 1. Owner prefix (e.g., "Player123's Togekiss")
-     * 2. preferAlly hint
-     * 3. First registered (fallback)
+     * 2. "opposing" or "the opposing" prefix (indicates opponent's Pokemon)
+     * 3. preferAlly hint
+     * 4. First registered (fallback)
      */
     private fun resolvePokemonUuid(pokemonName: String, preferAlly: Boolean? = null): UUID? {
         var lookupName = pokemonName.lowercase()
         var ownerDeterminedSide: Boolean? = null  // true = ally, false = opponent
+
+        // Check for "opposing" or "the opposing" prefix (indicates opponent's Pokemon)
+        // These prefixes are used by Cobblemon in battle messages to identify opponent Pokemon
+        val opposingPrefixes = listOf("the opposing ", "opposing ")
+        for (prefix in opposingPrefixes) {
+            if (lookupName.startsWith(prefix)) {
+                lookupName = lookupName.removePrefix(prefix)
+                ownerDeterminedSide = false  // This is definitely the opponent's Pokemon
+                CobblemonExtendedBattleUI.LOGGER.debug(
+                    "BattleStateTracker: Detected opponent prefix in '$pokemonName', using name '$lookupName'"
+                )
+                break
+            }
+        }
 
         // Check for owner prefix (e.g., "Player126's Tyranitar" -> owner="Player126", pokemon="Tyranitar")
         // This is the most reliable way to disambiguate in mirror matches
@@ -1154,7 +1639,12 @@ object BattleStateTracker {
             }
         }
 
-        val uuidList = nameToUuids[lookupName] ?: return null
+        val uuidList = nameToUuids[lookupName] ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "BattleStateTracker: Could not find Pokemon '$lookupName' (original: '$pokemonName') in registry"
+            )
+            return null
+        }
 
         // If only one Pokemon with this name, return it
         if (uuidList.size == 1) {

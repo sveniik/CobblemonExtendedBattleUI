@@ -112,8 +112,16 @@ object BattleMessageInterceptor {
         "cobblemon.battle.item.eat",            // Pokemon eats item
         "cobblemon.battle.item.harvest",        // Harvest regrows berry
         "cobblemon.battle.item.recycle",        // Recycle recovers item
-        "cobblemon.battle.item.trick",          // Trick obtains item
         "cobblemon.battle.damage.item"          // Item damages holder (Life Orb)
+    )
+
+    // Trick/Switcheroo: [pokemon, item] - Pokemon obtained item via swap (needs special handling)
+    private const val TRICK_KEY = "cobblemon.battle.item.trick"
+
+    // Trick/Switcheroo activation: [user] - Pokemon used the move to swap items
+    private val TRICK_ACTIVATE_KEYS = setOf(
+        "cobblemon.battle.activate.trick",
+        "cobblemon.battle.activate.switcheroo"
     )
 
     // Item reveal with different arg order: [target, item, user]
@@ -286,8 +294,77 @@ object BattleMessageInterceptor {
     private const val FAINT_KEY = "cobblemon.battle.fainted"
     private const val SWITCH_KEY = "cobblemon.battle.switch"
     private const val DRAG_KEY = "cobblemon.battle.drag"  // Forced switch (e.g., Roar, Whirlwind)
+    private const val SENDOUT_KEY = "cobblemon.battle.sendout"  // Initial Pokemon send out
+    private const val REPLACE_KEY = "cobblemon.battle.replace"  // Replace fainted Pokemon
     private const val PERISH_SONG_FIELD_KEY = "cobblemon.battle.fieldactivate.perishsong"  // Applies to all Pokemon
     private const val TRANSFORM_KEY = "cobblemon.battle.transform"  // Ditto Transform/Impostor
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Form Change Keys
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // General form changes: [pokemonName, formName]
+    private const val FORMECHANGE_PERMANENT_KEY = "cobblemon.battle.formechange.default.permanent"
+    private const val FORMECHANGE_TEMPORARY_KEY = "cobblemon.battle.formechange.default.temporary"
+    // Reversion to base form: [pokemonName]
+    private const val FORMECHANGE_ENDED_KEY = "cobblemon.battle.formechange.default.temporary.end"
+
+    // Mega Evolution: [pokemonName]
+    private const val MEGA_FORMECHANGE_KEY = "cobblemon.battle.formechange.mega"
+    private const val MEGA_EVOLVED_KEY = "cobblemon.battle.mega"
+
+    // Special Pokemon form changes (form name from key, not args): [pokemonName]
+    private val SPECIAL_FORMECHANGE_KEYS = mapOf(
+        "cobblemon.battle.formechange.ash" to "Ash-Greninja",
+        "cobblemon.battle.formechange.school" to "School",        // Wishiwashi School Form
+        "cobblemon.battle.formechange.meteor" to "Meteor"         // Minior Meteor Form
+    )
+
+    // Form change endings (special Pokemon revert): [pokemonName]
+    private val SPECIAL_FORMECHANGE_END_KEYS = mapOf(
+        "cobblemon.battle.formechange.wishiwashi" to "Solo",      // Wishiwashi reverts to Solo
+        "cobblemon.battle.formechange.minior" to "Core"           // Minior reverts to Core
+    )
+
+    // Dynamax/Gigantamax (Gen 8): [pokemonName]
+    private const val DYNAMAX_KEY = "cobblemon.battle.start.dynamax"
+    private const val GIGANTAMAX_KEY = "cobblemon.battle.start.gmax"
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Type Modification Move Keys
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Type change (replaces all types): [target, newType] - for Soak
+    private val TYPE_CHANGE_KEYS = setOf(
+        "cobblemon.battle.typechange",           // Soak: becomes pure type
+        "cobblemon.battle.typechange.soak",
+        "cobblemon.battle.start.typechange"
+    )
+
+    // Type added: [target, addedType] - for Trick-or-Treat, Forest's Curse
+    private val TYPE_ADD_KEYS = setOf(
+        "cobblemon.battle.typeadd",
+        "cobblemon.battle.typeadd.trickortreat",
+        "cobblemon.battle.typeadd.forestscurse",
+        "cobblemon.battle.start.typeadd"
+    )
+
+    // Type loss moves: [pokemonName] - type is implied by move, not in args
+    // Burn Up: Fire-type move that causes user to lose Fire type
+    // Multiple possible key formats for compatibility
+    private val BURN_UP_KEYS = setOf(
+        "cobblemon.battle.start.burnup",
+        "cobblemon.battle.start.typechange.burnup",
+        "cobblemon.battle.typechange.burnup",
+        "cobblemon.battle.burnup"
+    )
+    // Double Shock: Electric-type move that causes user to lose Electric type
+    private val DOUBLE_SHOCK_KEYS = setOf(
+        "cobblemon.battle.start.doubleshock",
+        "cobblemon.battle.start.typechange.doubleshock",
+        "cobblemon.battle.typechange.doubleshock",
+        "cobblemon.battle.doubleshock"
+    )
 
     // Volatile status start keys
     private val VOLATILE_START_KEYS = mapOf(
@@ -391,6 +468,7 @@ object BattleMessageInterceptor {
                         else -> it.toString()
                     }
                 }}")
+
             }
 
             if (key == TURN_KEY) {
@@ -414,6 +492,7 @@ object BattleMessageInterceptor {
                     BattleStateTracker.stealPositiveStats(lastMoveUser!!, lastMoveTarget!!)
                 }
                 // Don't return - let it continue to be processed by BattleLog
+                // Note: Burn Up/Double Shock type loss is handled via translation key detection below
             }
 
             // Track move usage without target (self-targeting moves like Baton Pass)
@@ -432,6 +511,7 @@ object BattleMessageInterceptor {
                     BattleStateTracker.markBatonPassUsed(lastMoveUser!!)
                 }
                 // Don't return - let it continue to be processed by BattleLog
+                // Note: Burn Up/Double Shock type loss is handled via translation key detection below
             }
 
             // Pressure ability announcement - register Pokemon with Pressure
@@ -643,6 +723,12 @@ object BattleMessageInterceptor {
                 return
             }
 
+            // Trick/Switcheroo item swap: [pokemon, item] - replaces old item tracking
+            if (key == TRICK_KEY) {
+                extractTrickItem(args)
+                return
+            }
+
             // Life Orb damage message: [pokemon] - item name not included, we know it's Life Orb
             if (key == LIFE_ORB_KEY) {
                 extractLifeOrbReveal(args)
@@ -703,6 +789,13 @@ object BattleMessageInterceptor {
                 return
             }
 
+            // Trick/Switcheroo activation: [user] - marks that user is swapping items
+            // This fires before item.trick messages, so we mark the user's item as being swapped
+            if (key in TRICK_ACTIVATE_KEYS) {
+                extractTrickActivation(args)
+                return
+            }
+
             // Healing items (Leftovers, Black Sludge): [pokemon, item]
             // These items heal each turn but remain held
             if (key in HEALING_ITEM_KEYS) {
@@ -723,12 +816,134 @@ object BattleMessageInterceptor {
                 return
             }
 
+            // ═══════════════════════════════════════════════════════════════════════════
+            // Form Change Detection
+            // ═══════════════════════════════════════════════════════════════════════════
+
+            // General form changes with form name in args: [pokemonName, formName]
+            if (key == FORMECHANGE_PERMANENT_KEY && args.size >= 2) {
+                val pokemonName = argToString(args[0])
+                val formName = argToString(args[1])
+                BattleStateTracker.setCurrentForm(pokemonName, formName, isMega = false, isTemporary = false)
+                // Trigger type update for the new form
+                val speciesId = BattleStateTracker.getSpeciesIdByName(pokemonName)
+                BattleStateTracker.updateTypesForFormChange(pokemonName, speciesId, formName)
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            if (key == FORMECHANGE_TEMPORARY_KEY && args.size >= 2) {
+                val pokemonName = argToString(args[0])
+                val formName = argToString(args[1])
+                BattleStateTracker.setCurrentForm(pokemonName, formName, isMega = false, isTemporary = true)
+                // Trigger type update for the new form
+                val speciesId = BattleStateTracker.getSpeciesIdByName(pokemonName)
+                BattleStateTracker.updateTypesForFormChange(pokemonName, speciesId, formName)
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Form reversion: [pokemonName]
+            if (key == FORMECHANGE_ENDED_KEY && args.isNotEmpty()) {
+                val pokemonName = argToString(args[0])
+                BattleStateTracker.clearCurrentForm(pokemonName)
+                // Restore original types when form reverts
+                BattleStateTracker.restoreOriginalTypes(pokemonName)
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Mega Evolution: [pokemonName]
+            if ((key == MEGA_FORMECHANGE_KEY || key == MEGA_EVOLVED_KEY) && args.isNotEmpty()) {
+                val pokemonName = argToString(args[0])
+                BattleStateTracker.setCurrentForm(pokemonName, "Mega", isMega = true, isTemporary = false)
+                // Trigger type update for Mega form
+                val speciesId = BattleStateTracker.getSpeciesIdByName(pokemonName)
+                BattleStateTracker.updateTypesForFormChange(pokemonName, speciesId, "Mega")
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Special Pokemon form changes (form name from key)
+            SPECIAL_FORMECHANGE_KEYS[key]?.let { formName ->
+                if (args.isNotEmpty()) {
+                    val pokemonName = argToString(args[0])
+                    BattleStateTracker.setCurrentForm(pokemonName, formName, isMega = false, isTemporary = true)
+                    // Trigger type update for special form
+                    val speciesId = BattleStateTracker.getSpeciesIdByName(pokemonName)
+                    BattleStateTracker.updateTypesForFormChange(pokemonName, speciesId, formName)
+                }
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Special Pokemon form reversions
+            SPECIAL_FORMECHANGE_END_KEYS[key]?.let { revertFormName ->
+                if (args.isNotEmpty()) {
+                    val pokemonName = argToString(args[0])
+                    // These are reversions - clear the form state
+                    BattleStateTracker.clearCurrentForm(pokemonName)
+                    // Restore original types when form reverts
+                    BattleStateTracker.restoreOriginalTypes(pokemonName)
+                    CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: $pokemonName reverted to $revertFormName")
+                }
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // Dynamax/Gigantamax (temporary battle forms)
+            if (key == DYNAMAX_KEY && args.isNotEmpty()) {
+                val pokemonName = argToString(args[0])
+                BattleStateTracker.setCurrentForm(pokemonName, "Dynamax", isMega = false, isTemporary = true)
+                // Note: Dynamax doesn't change types, but may affect base stats
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            if (key == GIGANTAMAX_KEY && args.isNotEmpty()) {
+                val pokemonName = argToString(args[0])
+                BattleStateTracker.setCurrentForm(pokemonName, "Gigantamax", isMega = false, isTemporary = true)
+                // Note: Gigantamax doesn't change types, but may affect base stats
+                // Don't return - let it continue to be processed by BattleLog
+            }
+
+            // ═══════════════════════════════════════════════════════════════════════════
+            // Type Modification Move Detection
+            // ═══════════════════════════════════════════════════════════════════════════
+
+            // Type replacement (Soak - becomes pure Water type)
+            if (key in TYPE_CHANGE_KEYS && args.size >= 2) {
+                val targetName = argToString(args[0])
+                val newType = argToString(args[1])
+                BattleStateTracker.setTypeReplacement(targetName, newType, null, null)
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: $targetName type changed to $newType")
+                // Don't return - let BattleLog display it
+            }
+
+            // Type addition (Trick-or-Treat adds Ghost, Forest's Curse adds Grass)
+            if (key in TYPE_ADD_KEYS && args.size >= 2) {
+                val targetName = argToString(args[0])
+                val addedType = argToString(args[1])
+                BattleStateTracker.addType(targetName, addedType, null)
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: $targetName gained $addedType type")
+                // Don't return - let BattleLog display it
+            }
+
+            // Burn Up - loses Fire type (args: [pokemonName])
+            if (key in BURN_UP_KEYS && args.isNotEmpty()) {
+                val pokemonName = argToString(args[0])
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Burn Up detected for '$pokemonName'")
+                BattleStateTracker.loseType(pokemonName, "Fire", null)
+                // Don't return - let BattleLog display it
+            }
+
+            // Double Shock - loses Electric type (args: [pokemonName])
+            if (key in DOUBLE_SHOCK_KEYS && args.isNotEmpty()) {
+                val pokemonName = argToString(args[0])
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Double Shock detected for '$pokemonName'")
+                BattleStateTracker.loseType(pokemonName, "Electric", null)
+                // Don't return - let BattleLog display it
+            }
+
             // Faint/switch clears stats and volatile statuses
             if (key == FAINT_KEY) {
                 markPokemonFainted(args)
                 return
             }
-            if (key == SWITCH_KEY || key == DRAG_KEY) {
+            if (key == SWITCH_KEY || key == DRAG_KEY || key == SENDOUT_KEY || key == REPLACE_KEY) {
                 clearPokemonState(args)
                 return
             }
@@ -791,35 +1006,41 @@ object BattleMessageInterceptor {
             else -> arg0.toString()
         }
 
-        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Clearing stats, volatiles, and transform for $pokemonName (switch)")
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Switch/drag detected for '$pokemonName' - clearing transform and form state")
         BattleStateTracker.clearPokemonStatsByName(pokemonName)
         BattleStateTracker.clearPokemonVolatilesByName(pokemonName)
 
         // Clear transform status - Pokemon reverts to original form when switched out
         BattleStateTracker.clearTransformStatusByName(pokemonName)
         TeamIndicatorUI.clearTransformStatus(pokemonName)
+
+        // Restore original types when switching out (handles both Transform and form changes)
+        BattleStateTracker.restoreOriginalTypes(pokemonName)
+
+        // Clear form state - Pokemon reverts to base form when switched out
+        BattleStateTracker.clearCurrentForm(pokemonName)
     }
 
     /**
-     * Handle Transform (Ditto) - mark the transforming Pokemon for later form reversion.
+     * Handle Transform (Ditto) - copy target's species data to transformer and update types.
      * Args: [transformer, target] - transformer transformed into target
      */
     private fun markPokemonTransformed(args: Array<out Any>) {
-        if (args.isEmpty()) return
-
-        val pokemonName = when (val arg0 = args[0]) {
-            is Text -> arg0.string
-            is String -> arg0
-            else -> arg0.toString()
+        if (args.size < 2) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Transform message needs 2 args, got ${args.size}")
+            return
         }
 
-        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Pokemon transformed - $pokemonName")
+        val transformerName = argToString(args[0])
+        val targetName = argToString(args[1])
+
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Transform detected - '$transformerName' transformed into '$targetName'")
 
         // Mark in BattleStateTracker for form reversion on faint
-        BattleStateTracker.markAsTransformed(pokemonName)
+        BattleStateTracker.markAsTransformed(transformerName)
 
-        // Notify TeamIndicatorUI to track the transformation
-        TeamIndicatorUI.markPokemonAsTransformed(pokemonName)
+        // Notify TeamIndicatorUI to copy target's species data, types, and ability to transformer
+        TeamIndicatorUI.markPokemonAsTransformed(transformerName, targetName)
     }
 
     private fun argToString(arg: Any): String {
@@ -998,7 +1219,7 @@ object BattleMessageInterceptor {
 
     /**
      * Standard item reveal: args = [pokemon, item]
-     * Used for: Air Balloon, item.eat, Harvest, Recycle, Trick obtain, damage.item (Life Orb)
+     * Used for: Air Balloon, item.eat, Harvest, Recycle, damage.item (Life Orb)
      */
     private fun extractItemReveal(args: Array<out Any>) {
         if (args.size < 2) return
@@ -1007,6 +1228,36 @@ object BattleMessageInterceptor {
         val itemName = argToString(args[1])
 
         BattleStateTracker.setItem(pokemonName, itemName, BattleStateTracker.ItemStatus.HELD)
+    }
+
+    /**
+     * Trick/Switcheroo item obtain: args = [pokemon, item]
+     * Unlike standard reveal, this replaces any existing item tracking since Trick swaps items.
+     * The Pokemon's old item (if any) loses its effects; the new item's effects now apply.
+     */
+    private fun extractTrickItem(args: Array<out Any>) {
+        if (args.size < 2) return
+
+        val pokemonName = argToString(args[0])
+        val itemName = argToString(args[1])
+
+        BattleStateTracker.receiveItemViaTrick(pokemonName, itemName)
+    }
+
+    /**
+     * Trick/Switcheroo activation: args = [user]
+     * This fires when a Pokemon uses Trick/Switcheroo, before the item.trick messages.
+     * We mark the user's current item as being swapped away so stat calculations update.
+     */
+    private fun extractTrickActivation(args: Array<out Any>) {
+        if (args.isEmpty()) return
+
+        val userName = argToString(args[0])
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: $userName used Trick/Switcheroo")
+
+        // Mark the user's current item as swapped away
+        // The item.trick message will follow with what item they received
+        BattleStateTracker.markItemSwapped(userName)
     }
 
     /**

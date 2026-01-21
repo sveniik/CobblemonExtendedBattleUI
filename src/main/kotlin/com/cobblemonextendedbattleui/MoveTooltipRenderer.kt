@@ -3,6 +3,7 @@ package com.cobblemonextendedbattleui
 import com.cobblemon.mod.common.api.moves.MoveTemplate
 import com.cobblemon.mod.common.api.moves.categories.DamageCategories
 import com.cobblemon.mod.common.api.types.ElementalType
+import com.cobblemon.mod.common.api.types.ElementalTypes
 import com.cobblemon.mod.common.battles.ai.strongBattleAI.AIUtility
 import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.render.drawScaledText
@@ -153,8 +154,9 @@ object MoveTooltipRenderer {
         matrices.push()
         matrices.translate(0.0, 0.0, 400.0)
 
-        // Get type color for border
-        val typeColor = UIUtils.getTypeColor(move.moveTemplate.elementalType)
+        // Get type color for border (uses effective type for Hidden Power, Pixilate, etc.)
+        val effectiveType = getMoveEffectiveType(move)
+        val typeColor = UIUtils.getTypeColor(effectiveType)
 
         // Draw background with type-colored border
         drawTooltipBackground(context, tooltipX, tooltipY, tooltipWidth, tooltipHeight, typeColor)
@@ -188,13 +190,15 @@ object MoveTooltipRenderer {
         val lines = mutableListOf<List<Pair<String, Int>>>()
         val template = move.moveTemplate
 
-        val typeColor = UIUtils.getTypeColor(template.elementalType)
+        // Get effective type (handles Hidden Power, Pixilate, etc.)
+        val effectiveType = getMoveEffectiveType(move)
+        val typeColor = UIUtils.getTypeColor(effectiveType)
 
         // Move name
         lines.add(listOf(template.displayName.string to typeColor))
 
         // Type and Category
-        val typeName = template.elementalType.displayName.string
+        val typeName = effectiveType.displayName.string
         val categoryName = template.damageCategory.displayName.string
         val categoryColor = when (template.damageCategory) {
             DamageCategories.PHYSICAL -> COLOR_PHYSICAL
@@ -212,12 +216,12 @@ object MoveTooltipRenderer {
             val basePower = template.power.toInt()
             val playerTypes = getPlayerPokemonTypes()
             val playerAbility = getPlayerPokemonAbility()
-            val hasStab = playerTypes.any { it.name == template.elementalType.name }
+            val hasStab = playerTypes.any { it.name == effectiveType.name }
             val hasSheerForce = playerAbility == "sheerforce" &&
                 template.effectChances.isNotEmpty() && template.effectChances[0] > 0
 
             // Check for held item power boost
-            val itemBoost = getHeldItemPowerBoost(template.elementalType.name)
+            val itemBoost = getHeldItemPowerBoost(effectiveType.name)
 
 
             // Calculate effective power with modifiers
@@ -384,16 +388,13 @@ object MoveTooltipRenderer {
         val opponents = opponentSide.activeClientBattlePokemon.mapNotNull { it.battlePokemon }
         if (opponents.isEmpty()) return emptyList()
 
-        val moveType = move.moveTemplate.elementalType
+        // Get effective move type (handles Hidden Power, Pixilate, etc.)
+        val moveType = getMoveEffectiveType(move)
         val isStatusMove = move.moveTemplate.damageCategory == DamageCategories.STATUS
 
         for (opponent in opponents) {
-            // Get form-specific types using species + aspects
-            // e.g., Hisuian Zoroark's aspects include "hisuian" which gives Ghost/Normal typing
-            val species = opponent.species
-            val aspects = opponent.state.currentAspects
-            val form = species.getForm(aspects)
-            val types = listOfNotNull(form.primaryType, form.secondaryType)
+            // Get opponent types, checking dynamic state first (Soak, Protean, Burn Up, etc.)
+            val types = getOpponentEffectiveTypes(opponent)
 
             if (types.isEmpty()) continue
 
@@ -463,15 +464,91 @@ object MoveTooltipRenderer {
 
     /**
      * Get the types of the player's active Pokemon for STAB calculation.
+     * Uses dynamic type state if available (handles Burn Up, Soak, Protean, etc.)
      */
     private fun getPlayerPokemonTypes(): List<ElementalType> {
         val battle = CobblemonClient.battle ?: return emptyList()
         val playerUUID = MinecraftClient.getInstance().player?.uuid ?: return emptyList()
         val playerSide = if (battle.side1.actors.any { it.uuid == playerUUID }) battle.side1 else battle.side2
         val clientBattlePokemon = playerSide.activeClientBattlePokemon.firstOrNull()?.battlePokemon ?: return emptyList()
-        // Get form-specific types using species + aspects
+        val pokemonUuid = clientBattlePokemon.uuid
+
+        // Check for dynamic type changes (Burn Up, Soak, Protean, Trick-or-Treat, etc.)
+        val dynamicTypes = BattleStateTracker.getDynamicTypes(pokemonUuid)
+        if (dynamicTypes != null) {
+            val types = mutableListOf<ElementalType>()
+
+            // Add primary type if not lost
+            dynamicTypes.primaryType?.let { typeName ->
+                ElementalTypes.get(typeName.lowercase())?.let { types.add(it) }
+            }
+
+            // Add secondary type if exists
+            dynamicTypes.secondaryType?.let { typeName ->
+                ElementalTypes.get(typeName.lowercase())?.let { types.add(it) }
+            }
+
+            // Add any added types (Trick-or-Treat adds Ghost, Forest's Curse adds Grass)
+            for (addedType in dynamicTypes.addedTypes) {
+                ElementalTypes.get(addedType.lowercase())?.let { types.add(it) }
+            }
+
+            return types
+        }
+
+        // Fallback: Get form-specific types using species + aspects
         val species = clientBattlePokemon.species
         val aspects = clientBattlePokemon.state.currentAspects
+        val form = species.getForm(aspects)
+        return listOfNotNull(form.primaryType, form.secondaryType)
+    }
+
+    /**
+     * Get the effective type of a move, accounting for Hidden Power, Pixilate, etc.
+     * Uses the player's active Pokemon to compute the actual move type.
+     */
+    private fun getMoveEffectiveType(move: MoveTileBounds): ElementalType {
+        val playerPokemon = getPlayerPartyPokemon()
+        return if (playerPokemon != null) {
+            move.moveTemplate.getEffectiveElementalType(playerPokemon)
+        } else {
+            move.moveTemplate.elementalType
+        }
+    }
+
+    /**
+     * Get the effective types of an opponent Pokemon, checking dynamic type state first.
+     * Handles Soak, Protean, Burn Up, Trick-or-Treat, Forest's Curse, etc.
+     */
+    private fun getOpponentEffectiveTypes(opponent: com.cobblemon.mod.common.client.battle.ClientBattlePokemon): List<ElementalType> {
+        val pokemonUuid = opponent.uuid
+
+        // Check for dynamic type changes (Soak, Protean, Burn Up, Trick-or-Treat, etc.)
+        val dynamicTypes = BattleStateTracker.getDynamicTypes(pokemonUuid)
+        if (dynamicTypes != null) {
+            val types = mutableListOf<ElementalType>()
+
+            // Add primary type if not lost
+            dynamicTypes.primaryType?.let { typeName ->
+                ElementalTypes.get(typeName.lowercase())?.let { types.add(it) }
+            }
+
+            // Add secondary type if exists
+            dynamicTypes.secondaryType?.let { typeName ->
+                ElementalTypes.get(typeName.lowercase())?.let { types.add(it) }
+            }
+
+            // Add any added types (Trick-or-Treat adds Ghost, Forest's Curse adds Grass)
+            for (addedType in dynamicTypes.addedTypes) {
+                ElementalTypes.get(addedType.lowercase())?.let { types.add(it) }
+            }
+
+            return types
+        }
+
+        // Fallback: Get form-specific types using species + aspects
+        val species = opponent.species
+        val aspects = opponent.state.currentAspects
         val form = species.getForm(aspects)
         return listOfNotNull(form.primaryType, form.secondaryType)
     }

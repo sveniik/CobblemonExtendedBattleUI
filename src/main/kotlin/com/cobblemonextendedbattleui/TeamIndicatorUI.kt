@@ -188,6 +188,7 @@ object TeamIndicatorUI {
      * Aggregated data for tooltip display.
      */
     data class TooltipData(
+        val uuid: UUID,  // UUID for looking up revealed ability in speed calculations
         val pokemonName: String,
         val pokemonId: Identifier?,
         val hpPercent: Float,
@@ -210,7 +211,9 @@ object TeamIndicatorUI {
         val primaryType: ElementalType? = null,
         val secondaryType: ElementalType? = null,
         val teraType: TeraType? = null,
-        val form: FormData? = null
+        val form: FormData? = null,
+        val lostPrimaryType: Boolean = false,  // True if primary type was lost (show "???")
+        val addedTypes: List<String> = emptyList()  // Types added by moves (Trick-or-Treat, Forest's Curse)
     )
 
     // Currently rendered pokeball bounds (refreshed each frame)
@@ -637,14 +640,20 @@ object TeamIndicatorUI {
     data class SpeedRangeResult(
         val minSpeed: Int,
         val maxSpeed: Int,
-        val abilityNote: String? = null  // Note if ability could boost speed
+        val abilityNote: String? = null,  // Note if ability could boost speed
+        val itemNote: String? = null      // Note if item affects speed (Choice Scarf, Iron Ball)
     )
 
     /**
      * Calculate speed range for opponent with all modifiers considered.
-     * Accounts for possible abilities that could boost speed in current conditions.
+     *
+     * When the opponent's ability has been revealed (e.g., Battle Armor triggers),
+     * we use only that ability for speed calculations - not all possible species abilities.
+     * This prevents inflated max speed from impossible abilities (e.g., Swift Swim showing
+     * when we KNOW the Kabutops has Battle Armor).
      */
     private fun calculateOpponentSpeedRange(
+        uuid: UUID,
         pokemonId: Identifier,
         level: Int,
         speedStage: Int,
@@ -659,7 +668,7 @@ object TeamIndicatorUI {
         val weather = BattleStateTracker.weather?.type
         val terrain = BattleStateTracker.terrain?.type
         val hasStatus = status != null
-        val itemConsumed = knownItem?.status == BattleStateTracker.ItemStatus.CONSUMED
+        val itemConsumed = knownItem?.status != BattleStateTracker.ItemStatus.HELD
 
         // Calculate base stat range (0 IV/0 EV/- nature to 31 IV/252 EV/+ nature)
         val minBaseStat = calculateStat(baseSpeed, level, 0, 0, 0.9)
@@ -668,52 +677,82 @@ object TeamIndicatorUI {
         val stageMultiplier = getStageMultiplier(speedStage)
         val statusMultiplier = getStatusSpeedMultiplier(status, null)  // Conservative: assume no Quick Feet for min
 
-        // For min speed: assume worst case (no ability boost, paralysis penalty if paralyzed)
-        val minSpeed = (minBaseStat * stageMultiplier * statusMultiplier).toInt()
+        // Calculate item speed multiplier if item is known and held
+        val itemName = if (!itemConsumed) knownItem?.name else null
+        val itemMultiplier = if (itemName != null) getItemSpeedMultiplier(itemName) else 1.0
 
-        // For max speed: check if any ability could boost speed
-        val maxAbilityMultiplier =
+        // For min speed: assume worst case (no ability boost, paralysis penalty if paralyzed)
+        // Item multiplier applies to both min and max since we know the item
+        val minSpeed = (minBaseStat * stageMultiplier * statusMultiplier * itemMultiplier).toInt()
+
+        // Check if ability has been revealed - if so, only use that specific ability
+        val revealedAbility = BattleStateTracker.getRevealedAbility(uuid)
+
+        // For max speed: use revealed ability if known, otherwise consider all possibilities
+        val maxAbilityMultiplier = if (revealedAbility != null) {
+            // Ability is known - use only this ability's speed multiplier
+            getAbilitySpeedMultiplier(normalizeAbilityName(revealedAbility), weather, terrain, hasStatus, itemConsumed)
+        } else {
+            // Ability unknown - consider all possible abilities (existing behavior)
             getMaxPossibleAbilitySpeedMultiplier(pokemonId, weather, terrain, hasStatus, itemConsumed)
+        }
 
         // For paralysis: Quick Feet could negate the penalty AND give 1.5x
         val maxStatusMultiplier = if (status == Statuses.PARALYSIS) {
-            // Check if Quick Feet is possible
-            val possibleAbilities = species.abilities.mapNotNull { normalizeAbilityName(it.template.name) }
-            if ("quickfeet" in possibleAbilities) 1.0 else statusMultiplier
+            if (revealedAbility != null) {
+                // Ability known - check if it's Quick Feet
+                if (normalizeAbilityName(revealedAbility) == "quickfeet") 1.0 else statusMultiplier
+            } else {
+                // Ability unknown - check if Quick Feet is possible
+                val possibleAbilities = species.abilities.mapNotNull { normalizeAbilityName(it.template.name) }
+                if ("quickfeet" in possibleAbilities) 1.0 else statusMultiplier
+            }
         } else {
             1.0
         }
 
         val maxSpeed =
-            (maxBaseStat * stageMultiplier * maxAbilityMultiplier.coerceAtLeast(1.0) * maxStatusMultiplier).toInt()
+            (maxBaseStat * stageMultiplier * maxAbilityMultiplier.coerceAtLeast(1.0) * maxStatusMultiplier * itemMultiplier).toInt()
 
         // Generate ability note if conditions apply
-        val abilityNote = when {
-            maxAbilityMultiplier > 1.0 -> {
-                val activeConditions = mutableListOf<String>()
-                val normalizedAbilities = species.abilities.mapNotNull { normalizeAbilityName(it.template.name) }
-                if (weather == BattleStateTracker.Weather.SUN && "chlorophyll" in normalizedAbilities) {
-                    activeConditions.add("Chlorophyll")
-                }
-                if (weather == BattleStateTracker.Weather.RAIN && "swiftswim" in normalizedAbilities) {
-                    activeConditions.add("Swift Swim")
-                }
-                if (weather == BattleStateTracker.Weather.SANDSTORM && "sandrush" in normalizedAbilities) {
-                    activeConditions.add("Sand Rush")
-                }
-                if ((weather == BattleStateTracker.Weather.SNOW || weather == BattleStateTracker.Weather.HAIL) && "slushrush" in normalizedAbilities) {
-                    activeConditions.add("Slush Rush")
-                }
-                if (terrain == BattleStateTracker.Terrain.ELECTRIC && "surgesurfer" in normalizedAbilities) {
-                    activeConditions.add("Surge Surfer")
-                }
-                if (activeConditions.isNotEmpty()) activeConditions.joinToString("/") + "?" else null
+        val abilityNote = if (revealedAbility != null) {
+            // Ability is known - only show note if THIS ability has an active speed boost
+            if (maxAbilityMultiplier > 1.0) {
+                formatAbilityName(revealedAbility)  // No "?" since we know the ability
+            } else {
+                null
             }
-
-            else -> null
+        } else {
+            // Ability unknown - show possible speed-boosting abilities with "?"
+            when {
+                maxAbilityMultiplier > 1.0 -> {
+                    val activeConditions = mutableListOf<String>()
+                    val normalizedAbilities = species.abilities.mapNotNull { normalizeAbilityName(it.template.name) }
+                    if (weather == BattleStateTracker.Weather.SUN && "chlorophyll" in normalizedAbilities) {
+                        activeConditions.add("Chlorophyll")
+                    }
+                    if (weather == BattleStateTracker.Weather.RAIN && "swiftswim" in normalizedAbilities) {
+                        activeConditions.add("Swift Swim")
+                    }
+                    if (weather == BattleStateTracker.Weather.SANDSTORM && "sandrush" in normalizedAbilities) {
+                        activeConditions.add("Sand Rush")
+                    }
+                    if ((weather == BattleStateTracker.Weather.SNOW || weather == BattleStateTracker.Weather.HAIL) && "slushrush" in normalizedAbilities) {
+                        activeConditions.add("Slush Rush")
+                    }
+                    if (terrain == BattleStateTracker.Terrain.ELECTRIC && "surgesurfer" in normalizedAbilities) {
+                        activeConditions.add("Surge Surfer")
+                    }
+                    if (activeConditions.isNotEmpty()) activeConditions.joinToString("/") + "?" else null
+                }
+                else -> null
+            }
         }
 
-        return SpeedRangeResult(minSpeed, maxSpeed, abilityNote)
+        // Generate item note if item affects speed
+        val itemNote = if (itemMultiplier != 1.0 && itemName != null) itemName else null
+
+        return SpeedRangeResult(minSpeed, maxSpeed, abilityNote, itemNote)
     }
 
     /**
@@ -767,62 +806,346 @@ object TeamIndicatorUI {
     fun isPokemonKO(uuid: UUID): Boolean = knockedOutPokemon.contains(uuid) || BattleStateTracker.isKO(uuid)
 
     /**
+     * Check for transformed Pokemon that are no longer active and reset their transform status.
+     * This handles the case where a transformed Ditto switches out - the switch message only
+     * contains the incoming Pokemon's name, not the outgoing one, so we detect switch-out
+     * by checking if transformed Pokemon are still in the active Pokemon lists.
+     */
+    private fun checkForSwitchedOutTransforms(leftSide: ClientBattleSide, rightSide: ClientBattleSide) {
+        // Get all currently active Pokemon UUIDs from both sides
+        val activeUuids = mutableSetOf<UUID>()
+        for (actor in leftSide.actors + rightSide.actors) {
+            for (activePokemon in actor.activePokemon) {
+                activePokemon.battlePokemon?.uuid?.let { activeUuids.add(it) }
+            }
+        }
+
+        // Check all tracked Pokemon from both sides
+        val allTracked = trackedSide1Pokemon.values + trackedSide2Pokemon.values
+        for (tracked in allTracked) {
+            if (tracked.isTransformed && tracked.uuid !in activeUuids) {
+                // This Pokemon is transformed but not active - it must have switched out
+                // Reset it to original form
+                CobblemonExtendedBattleUI.LOGGER.debug(
+                    "TeamIndicatorUI: Detected switch-out of transformed Pokemon ${tracked.displayName} (UUID: ${tracked.uuid})"
+                )
+                resetTransformedPokemon(tracked)
+            }
+        }
+    }
+
+    /**
+     * Reset a transformed Pokemon back to its original state.
+     * Called when we detect the Pokemon is no longer active.
+     */
+    private fun resetTransformedPokemon(tracked: TrackedPokemon) {
+        if (!tracked.isTransformed) return
+
+        val uuid = tracked.uuid
+
+        // Restore original species identifier
+        tracked.originalSpeciesIdentifier?.let { originalId ->
+            tracked.speciesIdentifier = originalId
+            // Restore form from original species
+            tracked.form = PokemonSpecies.getByIdentifier(originalId)?.standardForm
+            // Restore display name
+            tracked.displayName = PokemonSpecies.getByIdentifier(originalId)?.name ?: tracked.displayName
+        }
+        // Restore original aspects
+        tracked.aspects = tracked.originalAspects
+        tracked.isTransformed = false
+
+        // Clear the copied ability (it was the target's ability, not ours)
+        BattleStateTracker.clearRevealedAbility(uuid)
+
+        // Also clear dynamic types (Transform copies types)
+        BattleStateTracker.clearDynamicTypes(uuid)
+
+        // Clear transform tracking in BattleStateTracker too
+        BattleStateTracker.clearTransformStatus(uuid)
+
+        // Remove from pending transforms if queued
+        pendingTransforms.remove(uuid)
+
+        CobblemonExtendedBattleUI.LOGGER.debug(
+            "TeamIndicatorUI: Reset transformed Pokemon to original: ${tracked.originalSpeciesIdentifier}"
+        )
+    }
+
+    /**
      * Mark a Pokemon as transformed (Ditto via Transform/Impostor).
      * Saves the original species so it can be restored when the Pokemon faints.
      * If the Pokemon isn't tracked yet (Impostor triggers on switch-in), queues for later processing.
      */
-    fun markPokemonAsTransformed(pokemonName: String) {
-        val uuid = BattleStateTracker.getPokemonUuid(pokemonName) ?: run {
-            CobblemonExtendedBattleUI.LOGGER.debug("TeamIndicatorUI: Unknown Pokemon '$pokemonName' for transform tracking")
+    fun markPokemonAsTransformed(transformerName: String, targetName: String) {
+        val transformerUuid = BattleStateTracker.getPokemonUuid(transformerName) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("TeamIndicatorUI: Unknown transformer '$transformerName' for transform tracking")
             return
         }
 
-        // Find and update the tracked Pokemon
-        val tracked = trackedSide1Pokemon[uuid] ?: trackedSide2Pokemon[uuid]
-        if (tracked != null) {
-            applyTransformToTracked(tracked, pokemonName)
+        // Find the transformer's tracked data
+        val transformer = trackedSide1Pokemon[transformerUuid] ?: trackedSide2Pokemon[transformerUuid]
+
+        // Find the target Pokemon - search both sides by display name
+        val target = findTrackedPokemonByName(targetName)
+
+        if (transformer != null) {
+            applyTransformToTracked(transformer, transformerName, target)
         } else {
             // Pokemon not tracked yet - queue for when it gets added
             // This handles Impostor ability where transform message arrives before tracking
-            pendingTransforms.add(uuid)
+            pendingTransforms.add(transformerUuid)
             CobblemonExtendedBattleUI.LOGGER.debug(
-                "TeamIndicatorUI: Queued pending transform for $pokemonName (UUID: $uuid)"
+                "TeamIndicatorUI: Queued pending transform for $transformerName (UUID: $transformerUuid)"
             )
         }
     }
 
     /**
-     * Apply transform status to a tracked Pokemon, saving its original form.
+     * Find a tracked Pokemon by display name across both sides.
+     * Handles owner prefixes like "Player123's Gardevoir" -> "Gardevoir".
+     * Returns the first match found.
      */
-    private fun applyTransformToTracked(tracked: TrackedPokemon, debugName: String) {
-        // Only save if not already transformed (first transformation)
-        if (!tracked.isTransformed) {
-            tracked.originalSpeciesIdentifier = tracked.speciesIdentifier
-            tracked.originalAspects = tracked.aspects
-            tracked.isTransformed = true
+    private fun findTrackedPokemonByName(displayName: String): TrackedPokemon? {
+        val lowerName = displayName.lowercase()
+
+        // Strip owner prefix if present (e.g., "Player123's Gardevoir" -> "Gardevoir")
+        val strippedName = if (lowerName.contains("'s ")) {
+            lowerName.substringAfter("'s ")
+        } else {
+            lowerName
+        }
+
+        // Search both sides - try exact match first, then stripped name
+        for (tracked in trackedSide1Pokemon.values) {
+            val trackedName = tracked.displayName?.lowercase()
+            if (trackedName == lowerName || trackedName == strippedName) {
+                return tracked
+            }
+        }
+
+        for (tracked in trackedSide2Pokemon.values) {
+            val trackedName = tracked.displayName?.lowercase()
+            if (trackedName == lowerName || trackedName == strippedName) {
+                return tracked
+            }
+        }
+
+        CobblemonExtendedBattleUI.LOGGER.debug(
+            "TeamIndicatorUI: findTrackedPokemonByName - could not find '$displayName' (stripped: '$strippedName')"
+        )
+        return null
+    }
+
+    /**
+     * Apply transform status to a tracked Pokemon, copying target's species data and ability.
+     * @param transformer The Pokemon being transformed (e.g., Ditto)
+     * @param debugName Name for logging
+     * @param target The target Pokemon whose form is being copied (null if not found)
+     */
+    private fun applyTransformToTracked(transformer: TrackedPokemon, debugName: String, target: TrackedPokemon?) {
+        // Only save original if not already transformed (first transformation)
+        if (!transformer.isTransformed) {
+            // IMPORTANT: Only save original if not already set from first tracking.
+            // Due to a race condition, battle data updates may have already changed speciesIdentifier
+            // to the transformed form before this message arrives. The originalSpeciesIdentifier
+            // was correctly set when the Pokemon was first tracked, so we preserve that value.
+            if (transformer.originalSpeciesIdentifier == null) {
+                transformer.originalSpeciesIdentifier = transformer.speciesIdentifier
+            }
+            if (transformer.originalAspects.isEmpty()) {
+                transformer.originalAspects = transformer.aspects
+            }
+            transformer.isTransformed = true
             CobblemonExtendedBattleUI.LOGGER.debug(
-                "TeamIndicatorUI: Saved original form for $debugName: ${tracked.originalSpeciesIdentifier}"
+                "TeamIndicatorUI: Marked $debugName as transformed, original form: ${transformer.originalSpeciesIdentifier}"
+            )
+        }
+
+        // If we found the target, copy its species data to transformer
+        if (target != null) {
+            transformer.speciesIdentifier = target.speciesIdentifier
+            transformer.aspects = target.aspects
+            transformer.form = target.form
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "TeamIndicatorUI: $debugName copied species from target: ${target.speciesIdentifier}, " +
+                "aspects: ${target.aspects}, form: ${target.form?.name}"
+            )
+
+            // Update types in BattleStateTracker based on target's species
+            target.speciesIdentifier?.let { targetSpeciesId ->
+                val targetPrimaryType = target.form?.primaryType?.name
+                    ?: PokemonSpecies.getByIdentifier(targetSpeciesId)?.primaryType?.name
+                val targetSecondaryType = target.form?.secondaryType?.name
+                    ?: PokemonSpecies.getByIdentifier(targetSpeciesId)?.secondaryType?.name
+
+                if (targetPrimaryType != null) {
+                    BattleStateTracker.setTypeReplacement(debugName, targetPrimaryType, targetSecondaryType, null)
+                    CobblemonExtendedBattleUI.LOGGER.debug(
+                        "TeamIndicatorUI: Updated $debugName types to $targetPrimaryType/$targetSecondaryType"
+                    )
+                }
+            }
+
+            // Copy target's ability to transformer (Transform copies ability)
+            copyTargetAbilityToTransformer(transformer.uuid, target.uuid, debugName)
+        } else {
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "TeamIndicatorUI: Could not find target Pokemon to copy species data for $debugName"
             )
         }
     }
 
     /**
-     * Clear transform status for a Pokemon (on switch-out).
-     * The Pokemon returns to its original form when it leaves the field.
+     * Copy the target's ability to the transformer during Transform.
+     * For ally targets: get ability directly from battle Pokemon data.
+     * For opponent targets: get ability from revealed abilities (if known).
+     */
+    private fun copyTargetAbilityToTransformer(transformerUuid: UUID, targetUuid: UUID, debugName: String) {
+        val battle = CobblemonClient.battle ?: return
+
+        CobblemonExtendedBattleUI.LOGGER.debug(
+            "TeamIndicatorUI: copyTargetAbilityToTransformer - transformer=$transformerUuid, target=$targetUuid"
+        )
+
+        var targetAbility: String? = null
+
+        // Strategy 1: Try to get target's ability from Pokemon object
+        // This works when we have direct access to the Pokemon (our own Pokemon)
+        val targetPokemon = getBattlePokemonByUuid(targetUuid, battle)
+        if (targetPokemon != null) {
+            val rawAbilityName = targetPokemon.ability.name
+            targetAbility = formatAbilityName(rawAbilityName)
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "TeamIndicatorUI: Got target ability from Pokemon object: '$rawAbilityName' -> '$targetAbility'"
+            )
+        }
+
+        // Strategy 2: Check if target is in player's own team (we have full data access)
+        // actor.pokemon can be empty for opponent actors, but should be populated for our own
+        if (targetAbility == null) {
+            val playerUuid = MinecraftClient.getInstance().player?.uuid
+            if (playerUuid != null) {
+                // Find the player's actor
+                val playerActor = battle.side1.actors.find { it.uuid == playerUuid }
+                    ?: battle.side2.actors.find { it.uuid == playerUuid }
+
+                if (playerActor != null) {
+                    val pokemon = playerActor.pokemon.find { it.uuid == targetUuid }
+                    if (pokemon != null) {
+                        val rawAbilityName = pokemon.ability.name
+                        targetAbility = formatAbilityName(rawAbilityName)
+                        CobblemonExtendedBattleUI.LOGGER.debug(
+                            "TeamIndicatorUI: Got target ability from player's team: '$rawAbilityName' -> '$targetAbility'"
+                        )
+                    }
+                }
+            }
+        }
+
+        // Strategy 3: Check revealed abilities (for opponent Pokemon whose ability was shown)
+        if (targetAbility == null) {
+            targetAbility = BattleStateTracker.getRevealedAbility(targetUuid)
+            if (targetAbility != null) {
+                CobblemonExtendedBattleUI.LOGGER.debug(
+                    "TeamIndicatorUI: Got target ability from revealed abilities: $targetAbility"
+                )
+            }
+        }
+
+        // Strategy 4: Try to get ability from TrackedPokemon's form data
+        // If we tracked the target and know its species/form, look up default ability
+        if (targetAbility == null) {
+            val trackedTarget = trackedSide1Pokemon[targetUuid] ?: trackedSide2Pokemon[targetUuid]
+            if (trackedTarget?.form != null) {
+                // Get the first ability as fallback (most Pokemon have their primary ability)
+                val firstAbility = trackedTarget.form?.abilities?.firstOrNull()?.template?.name
+                if (firstAbility != null) {
+                    targetAbility = formatAbilityName(firstAbility)
+                    CobblemonExtendedBattleUI.LOGGER.debug(
+                        "TeamIndicatorUI: Got target ability from form data (fallback): $targetAbility"
+                    )
+                }
+            }
+        }
+
+        // Set the ability on the transformer
+        if (targetAbility != null) {
+            BattleStateTracker.setRevealedAbility(transformerUuid, targetAbility)
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "TeamIndicatorUI: Copied ability '$targetAbility' to $debugName"
+            )
+        } else {
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "TeamIndicatorUI: Could not determine target ability for $debugName"
+            )
+        }
+    }
+
+    /**
+     * Fully reset a transformed Pokemon back to its original state (on switch-out).
+     * Restores: species, aspects, form, and clears copied ability.
      */
     fun clearTransformStatus(pokemonName: String) {
-        val uuid = BattleStateTracker.getPokemonUuid(pokemonName) ?: return
+        CobblemonExtendedBattleUI.LOGGER.debug("TeamIndicatorUI: clearTransformStatus called for '$pokemonName'")
+
+        // Try to find UUID via BattleStateTracker first
+        var uuid = BattleStateTracker.getPokemonUuid(pokemonName)
+        var tracked: TrackedPokemon? = null
+
+        if (uuid != null) {
+            tracked = trackedSide1Pokemon[uuid] ?: trackedSide2Pokemon[uuid]
+        }
+
+        // Fallback: search tracked maps directly by display name
+        // This handles cases where name format doesn't match registration
+        if (tracked == null) {
+            CobblemonExtendedBattleUI.LOGGER.debug("TeamIndicatorUI: UUID lookup failed, trying direct name search for '$pokemonName'")
+            val foundByName = findTrackedPokemonByName(pokemonName)
+            if (foundByName != null) {
+                tracked = foundByName
+                uuid = foundByName.uuid
+                CobblemonExtendedBattleUI.LOGGER.debug("TeamIndicatorUI: Found by name search: UUID=$uuid")
+            }
+        }
+
+        if (uuid == null || tracked == null) {
+            CobblemonExtendedBattleUI.LOGGER.debug("TeamIndicatorUI: Failed to find Pokemon '$pokemonName' for transform reset")
+            return
+        }
 
         // Remove from pending if queued
         pendingTransforms.remove(uuid)
 
-        // Clear transform status in tracked Pokemon
-        val tracked = trackedSide1Pokemon[uuid] ?: trackedSide2Pokemon[uuid]
-        if (tracked != null && tracked.isTransformed) {
+        CobblemonExtendedBattleUI.LOGGER.debug("TeamIndicatorUI: Found UUID $uuid, isTransformed=${tracked.isTransformed}")
+
+        if (tracked.isTransformed) {
+            // Restore original species identifier
+            tracked.originalSpeciesIdentifier?.let { originalId ->
+                tracked.speciesIdentifier = originalId
+                // Restore form from original species
+                tracked.form = PokemonSpecies.getByIdentifier(originalId)?.standardForm
+            }
+            // Restore original aspects
+            tracked.aspects = tracked.originalAspects
+            // Restore original display name if we have it (for Ditto, show "Ditto" not the transformed name)
+            tracked.displayName = tracked.originalSpeciesIdentifier?.let {
+                PokemonSpecies.getByIdentifier(it)?.name ?: tracked.displayName
+            }
             tracked.isTransformed = false
-            // Don't clear originalSpeciesIdentifier - it's still the true original
+
+            // Clear the copied ability (it was the target's ability, not ours)
+            BattleStateTracker.clearRevealedAbility(uuid)
+
+            // Also clear dynamic types (Transform copies types)
+            BattleStateTracker.clearDynamicTypes(uuid)
+
             CobblemonExtendedBattleUI.LOGGER.debug(
-                "TeamIndicatorUI: Cleared transform status for $pokemonName"
+                "TeamIndicatorUI: Reset transformed $pokemonName back to ${tracked.originalSpeciesIdentifier}"
+            )
+        } else {
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "TeamIndicatorUI: $pokemonName not transformed, skipping reset"
             )
         }
     }
@@ -880,6 +1203,11 @@ object TeamIndicatorUI {
         // Update tracked Pokemon for both sides from battle data
         updateTrackedPokemonForSide(leftSide, trackedSide1Pokemon, isLeftSide = true)
         updateTrackedPokemonForSide(rightSide, trackedSide2Pokemon, isLeftSide = false)
+
+        // Check for transformed Pokemon that switched out (no longer active)
+        // This is needed because switch messages only contain the INCOMING Pokemon name,
+        // not the outgoing one, so we detect switch-out by checking active status
+        checkForSwitchedOutTransforms(leftSide, rightSide)
 
         // Count active Pokemon for positioning (determines how many tiles are shown)
         val leftActiveCount = leftSide.actors.sumOf { it.activePokemon.size }
@@ -1279,6 +1607,11 @@ object TeamIndicatorUI {
         // This catches KO status even if faint message hasn't arrived yet
         if (isKO) {
             knockedOutPokemon.add(uuid)
+        }
+
+        // Register species ID with BattleStateTracker for form lookup
+        if (speciesId != null) {
+            BattleStateTracker.registerSpeciesId(uuid, speciesId)
         }
 
         // Check if this Pokemon has a pending transform (Impostor triggered before tracking)
@@ -2239,21 +2572,37 @@ object TeamIndicatorUI {
             }
             // Player's Pokemon: show actual held item (if any)
             val heldItem = battlePokemon.heldItem()
-            item = if (!heldItem.isEmpty) {
-                // Check if we have tracked info about this item being consumed/knocked off
-                val trackedItem = BattleStateTracker.getItem(uuid)
-                if (trackedItem != null && trackedItem.status != BattleStateTracker.ItemStatus.HELD) {
-                    trackedItem  // Use tracked status if item was consumed/knocked off
-                } else {
+            val trackedItem = BattleStateTracker.getItem(uuid)
+            item = if (trackedItem != null) {
+                // We have tracked item info - use it
+                // This handles: consumed items, knocked off items, AND items changed via Trick
+                // (game's heldItem() may not update mid-battle after Trick)
+                if (trackedItem.status != BattleStateTracker.ItemStatus.HELD) {
+                    trackedItem  // Item was consumed/knocked off/swapped away
+                } else if (!heldItem.isEmpty && heldItem.name.string != trackedItem.name) {
+                    // Game shows different item than our tracking - our tracking is more recent (Trick swap)
+                    trackedItem
+                } else if (!heldItem.isEmpty) {
+                    // Same item - use game data with our status
                     BattleStateTracker.TrackedItem(
                         heldItem.name.string,
                         BattleStateTracker.ItemStatus.HELD,
                         BattleStateTracker.currentTurn
                     )
+                } else {
+                    // No item in game but we have tracking - Pokemon lost item (shouldn't happen but handle it)
+                    trackedItem
                 }
+            } else if (!heldItem.isEmpty) {
+                // No tracking but has item - just show the held item
+                BattleStateTracker.TrackedItem(
+                    heldItem.name.string,
+                    BattleStateTracker.ItemStatus.HELD,
+                    BattleStateTracker.currentTurn
+                )
             } else {
-                // No item held - check if one was consumed/knocked off
-                BattleStateTracker.getItem(uuid)
+                // No item and no tracking
+                null
             }
             // Get actual speed stat and ability for player's Pokemon
             actualSpeed = battlePokemon.speed
@@ -2261,13 +2610,23 @@ object TeamIndicatorUI {
             actualSpecialDefence = battlePokemon.specialDefence
             actualAttack = battlePokemon.attack
             actualSpecialAttack = battlePokemon.specialAttack
-            // Format the ability name properly (ability.name returns ID like "flashfire")
-            val rawAbilityName = battlePokemon.ability.name
-            val translatedAbility = Text.translatable("cobblemon.ability.$rawAbilityName").string
-            abilityName = if (translatedAbility.startsWith("cobblemon.") || translatedAbility == rawAbilityName) {
-                formatAbilityName(rawAbilityName)
+
+            // For transformed Pokemon (e.g., Ditto), use the copied ability, not the original
+            val isTransformed = trackedPokemon?.isTransformed == true || BattleStateTracker.isTransformed(uuid)
+            val copiedAbility = if (isTransformed) BattleStateTracker.getRevealedAbility(uuid) else null
+
+            if (copiedAbility != null) {
+                // Use the copied ability for transformed Pokemon
+                abilityName = copiedAbility
             } else {
-                translatedAbility
+                // Normal case: format the ability name from Pokemon data
+                val rawAbilityName = battlePokemon.ability.name
+                val translatedAbility = Text.translatable("cobblemon.ability.$rawAbilityName").string
+                abilityName = if (translatedAbility.startsWith("cobblemon.") || translatedAbility == rawAbilityName) {
+                    formatAbilityName(rawAbilityName)
+                } else {
+                    translatedAbility
+                }
             }
             possibleAbilities = null  // Player knows their own ability
         } else {
@@ -2321,22 +2680,62 @@ object TeamIndicatorUI {
         else if (battlePokemon != null) PokemonSpecies.getByIdentifier(battlePokemon.species.resourceIdentifier)
         else null
 
-        val primaryType = if (battlePokemon != null) battlePokemon.form.primaryType
-        else {
-            if (trackedPokemon?.form != null) trackedPokemon.form?.primaryType
-            else species?.primaryType
+        // Check for form change state and look up form-specific FormData
+        val currentFormState = BattleStateTracker.getCurrentForm(uuid)
+        val effectiveForm: FormData? = if (currentFormState != null && species != null) {
+            // Form change active - look up form-specific data
+            val aspect = BattleStateTracker.formNameToAspect(currentFormState.currentForm)
+            species.getForm(setOf(aspect))
+        } else {
+            // No form change - use tracked form or battlePokemon's form
+            trackedPokemon?.form ?: battlePokemon?.form
         }
 
-        val secondaryType = if (battlePokemon != null) battlePokemon.form.secondaryType
-        else {
-            if (trackedPokemon?.form != null) trackedPokemon.form?.secondaryType
-            else species?.secondaryType
+        // Check for dynamic type state (type changes from moves like Soak, Burn Up, Trick-or-Treat)
+        val dynamicTypeState = BattleStateTracker.getDynamicTypes(uuid)
+        val lostPrimaryType: Boolean
+        val addedTypes: List<String>
+        val primaryType: ElementalType?
+        val secondaryType: ElementalType?
+
+        if (dynamicTypeState != null) {
+            // Use dynamic types when available
+            lostPrimaryType = dynamicTypeState.hasLostPrimaryType
+            addedTypes = dynamicTypeState.addedTypes
+
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "TeamIndicatorUI: Dynamic types for $name - hasLostPrimary=${dynamicTypeState.hasLostPrimaryType}, " +
+                "primary=${dynamicTypeState.primaryType}, secondary=${dynamicTypeState.secondaryType}"
+            )
+
+            // Convert type name strings to ElementalType
+            primaryType = dynamicTypeState.primaryType?.let {
+                ElementalTypes.get(it.lowercase())
+            }
+            secondaryType = dynamicTypeState.secondaryType?.let {
+                ElementalTypes.get(it.lowercase())
+            }
+        } else {
+            // No dynamic state - use effectiveForm types (form-aware)
+            lostPrimaryType = false
+            addedTypes = emptyList()
+
+            primaryType = if (battlePokemon != null && currentFormState == null) battlePokemon.form.primaryType
+            else {
+                effectiveForm?.primaryType ?: species?.primaryType
+            }
+
+            secondaryType = if (battlePokemon != null && currentFormState == null) battlePokemon.form.secondaryType
+            else {
+                effectiveForm?.secondaryType ?: species?.secondaryType
+            }
         }
 
         val teraType = if (battlePokemon != null) battlePokemon.teraType
         else trackedPokemon?.teraType
 
         return TooltipData(
+            uuid = uuid,
             pokemonName = name,
             pokemonId = pokemonId,
             hpPercent = hpPercent,
@@ -2359,7 +2758,9 @@ object TeamIndicatorUI {
             primaryType = primaryType,
             secondaryType = secondaryType,
             teraType = teraType,
-            form = trackedPokemon?.form
+            form = effectiveForm,
+            lostPrimaryType = lostPrimaryType,
+            addedTypes = addedTypes
         )
     }
 
@@ -2380,14 +2781,49 @@ object TeamIndicatorUI {
         lines.add(listOf(data.pokemonName to nameColor))
 
         // Types
-        if (data.primaryType != null) {
+        // Note: A Pokemon can be completely typeless (e.g., after Burn Up on a mono-Fire type).
+        // When a dual-type Pokemon loses one type (e.g., Pawmot using Double Shock), show only
+        // the remaining type - don't show "???" unless the Pokemon has NO types at all.
+        val hasAnyTypeInfo = data.primaryType != null || data.lostPrimaryType || data.secondaryType != null || data.addedTypes.isNotEmpty()
+        val isCompletelyTypeless = data.primaryType == null && data.secondaryType == null && data.addedTypes.isEmpty()
+
+        if (hasAnyTypeInfo || isCompletelyTypeless) {
             val typeSegments = mutableListOf<Pair<String, Int>>()
-            typeSegments.add(data.primaryType.displayName.string to UIUtils.getTypeColor(data.primaryType))
+
+            // Primary type - only show "???" if COMPLETELY typeless (no secondary or added types either)
+            if (data.primaryType != null) {
+                typeSegments.add(data.primaryType.displayName.string to UIUtils.getTypeColor(data.primaryType))
+            } else if (isCompletelyTypeless) {
+                // Only show "???" when Pokemon has NO types at all (e.g., mono-Fire after Burn Up)
+                typeSegments.add("???" to TOOLTIP_DIM)
+            }
+            // If primary is null but secondary exists (e.g., Pawmot after Double Shock), skip primary entirely
+
+            // Secondary type
             if (data.secondaryType != null) {
-                typeSegments.add(" / " to TOOLTIP_DIM)
+                if (typeSegments.isNotEmpty()) {
+                    typeSegments.add(" / " to TOOLTIP_DIM)
+                }
                 typeSegments.add(data.secondaryType.displayName.string to UIUtils.getTypeColor(data.secondaryType))
             }
-            lines.add(typeSegments)
+
+            // Added types (from Trick-or-Treat, Forest's Curse)
+            for (addedType in data.addedTypes) {
+                if (typeSegments.isNotEmpty()) {
+                    typeSegments.add(" + " to TOOLTIP_DIM)
+                }
+                // Look up ElementalType for color, fall back to default if not found
+                val elementalType = ElementalTypes.get(addedType.lowercase())
+                if (elementalType != null) {
+                    typeSegments.add(elementalType.displayName.string to UIUtils.getTypeColor(elementalType))
+                } else {
+                    typeSegments.add(addedType to TOOLTIP_TEXT)
+                }
+            }
+
+            if (typeSegments.isNotEmpty()) {
+                lines.add(typeSegments)
+            }
         }
 
         // Tera Type (only show if known and enabled in settings)
@@ -2480,6 +2916,7 @@ object TeamIndicatorUI {
                 BattleStateTracker.ItemStatus.HELD -> "Item: ${item.name}"
                 BattleStateTracker.ItemStatus.KNOCKED_OFF -> "Item: ${item.name} (knocked off)"
                 BattleStateTracker.ItemStatus.STOLEN -> "Item: ${item.name} (stolen)"
+                BattleStateTracker.ItemStatus.SWAPPED -> "Item: ${item.name} (swapped)"
                 BattleStateTracker.ItemStatus.CONSUMED -> "Item: ${item.name} (used)"
             }
             val itemColor = if (item.status == BattleStateTracker.ItemStatus.HELD) TOOLTIP_TEXT else TOOLTIP_LABEL
@@ -2580,7 +3017,7 @@ object TeamIndicatorUI {
         if (data.isPlayerPokemon && data.actualSpeed != null) {
             // Player's Pokemon: show effective speed with all modifiers
             val itemName = data.item?.name
-            val itemConsumed = data.item?.status == BattleStateTracker.ItemStatus.CONSUMED
+            val itemConsumed = data.item?.status != BattleStateTracker.ItemStatus.HELD
             val baseStat = data.actualSpeed
             val effectiveSpeed = calculateEffectiveSpeed(
                 baseStat, speedStage, data.abilityName,
@@ -2606,12 +3043,13 @@ object TeamIndicatorUI {
         } else if (data.pokemonId != null && data.level != null) {
             // Opponent: show min-max speed range with ability considerations
             val speedRange = calculateOpponentSpeedRange(
-                data.pokemonId, data.level, speedStage, data.statusCondition, data.item, data.form
+                data.uuid, data.pokemonId, data.level, speedStage, data.statusCondition, data.item, data.form
             )
             if (speedRange != null) {
                 val modifiers = mutableListOf<String>()
                 if (speedStage != 0) modifiers.add(if (speedStage > 0) "+$speedStage" else "$speedStage")
                 speedRange.abilityNote?.let { modifiers.add(it) }
+                speedRange.itemNote?.let { modifiers.add(it) }
                 if (data.statusCondition == Statuses.PARALYSIS) modifiers.add("Para?")
                 val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
                 lines.add(listOf("Speed: ${speedRange.minSpeed}-${speedRange.maxSpeed}$modText" to TOOLTIP_SPEED))

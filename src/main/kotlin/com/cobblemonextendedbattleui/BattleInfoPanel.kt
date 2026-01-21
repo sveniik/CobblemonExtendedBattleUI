@@ -5,6 +5,7 @@ import com.cobblemon.mod.common.client.battle.ClientBattleSide
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.util.InputUtil
+import net.minecraft.util.Identifier
 import org.lwjgl.glfw.GLFW
 import java.util.UUID
 
@@ -530,16 +531,33 @@ object BattleInfoPanel {
                     BattleStateTracker.clearPokemonStats(uuid)
                     BattleStateTracker.clearPokemonVolatiles(uuid)
                 }
+                // Always restore original types on switch-out (Burn Up, Soak, etc. are reset)
+                // This is separate from Baton Pass - type changes don't transfer
+                BattleStateTracker.restoreOriginalTypes(uuid)
             }
         }
         previouslyActiveUUIDs = currentActiveUUIDs
 
         // Register Pokemon with ally status
+        // Register under both display name and species name for robust lookup
+        // Also register species ID for type tracking (needed for Burn Up, etc.)
         for (pokemon in allyPokemon) {
             BattleStateTracker.registerPokemon(pokemon.uuid, pokemon.displayName.string, isAlly = true)
+            // Also register under species name for consistent fallback lookup
+            pokemon.properties.species?.let { speciesName ->
+                BattleStateTracker.registerPokemon(pokemon.uuid, speciesName, isAlly = true)
+                // Register species ID for type tracking
+                BattleStateTracker.registerSpeciesId(pokemon.uuid, Identifier.of("cobblemon", speciesName))
+            }
         }
         for (pokemon in opponentPokemon) {
             BattleStateTracker.registerPokemon(pokemon.uuid, pokemon.displayName.string, isAlly = false)
+            // Also register under species name for consistent fallback lookup
+            pokemon.properties.species?.let { speciesName ->
+                BattleStateTracker.registerPokemon(pokemon.uuid, speciesName, isAlly = false)
+                // Register species ID for type tracking
+                BattleStateTracker.registerSpeciesId(pokemon.uuid, Identifier.of("cobblemon", speciesName))
+            }
         }
 
         // Apply any pending Baton Pass data to newly switched-in Pokemon

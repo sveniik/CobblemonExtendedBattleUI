@@ -150,16 +150,40 @@ object BattleStateTracker {
             return
         }
 
+        // Determine the original types - use existing if available, otherwise look up BASE species types
+        // This is critical for form-changing Pokemon like Castform: when going Normal→Fire→Water,
+        // we need to preserve Normal as the original, not the first changed form (Fire)
+        var originalPrimary = existing?.originalPrimaryType
+        var originalSecondary = existing?.originalSecondaryType
+
+        if (originalPrimary == null) {
+            // No existing state - look up the BASE species types (not the form types)
+            val speciesId = pokemonSpeciesIds[uuid]
+            val species = speciesId?.let { PokemonSpecies.getByIdentifier(it) }
+            if (species != null) {
+                // Use standardForm to get the base types, not the current form
+                originalPrimary = species.standardForm.primaryType?.name
+                originalSecondary = species.standardForm.secondaryType?.name
+                CobblemonExtendedBattleUI.LOGGER.debug(
+                    "BattleStateTracker: Initialized original types from base species for $pokemonName: $originalPrimary/$originalSecondary"
+                )
+            } else {
+                // Fallback: use the new types as original (not ideal but better than null)
+                originalPrimary = effectivePrimaryType
+                originalSecondary = effectiveSecondaryType
+            }
+        }
+
         dynamicTypes[uuid] = DynamicTypeState(
             primaryType = effectivePrimaryType,
             secondaryType = effectiveSecondaryType,
             hasLostPrimaryType = false,
             addedTypes = emptyList(),  // Type replacement clears added types
-            originalPrimaryType = existing?.originalPrimaryType ?: effectivePrimaryType,
-            originalSecondaryType = existing?.originalSecondaryType ?: effectiveSecondaryType
+            originalPrimaryType = originalPrimary,
+            originalSecondaryType = originalSecondary
         )
         CobblemonExtendedBattleUI.LOGGER.debug(
-            "BattleStateTracker: Type replacement for $pokemonName - primary=$effectivePrimaryType, secondary=$effectiveSecondaryType"
+            "BattleStateTracker: Type replacement for $pokemonName - current=$effectivePrimaryType/$effectiveSecondaryType, original=$originalPrimary/$originalSecondary"
         )
     }
 
@@ -345,15 +369,38 @@ object BattleStateTracker {
      * Convert form name from battle messages to Cobblemon aspect string.
      * Form names come from messages like "Mega Evolution" -> "mega",
      * "Zen Mode" -> "zen", "School Form" -> "school", etc.
+     *
+     * Different Pokemon use different aspect naming conventions:
+     * - Castform: "sunny-form", "rainy-form", "snowy-form"
+     * - Darmanitan: "zen-mode"
+     * - Mega Evolution: "mega"
+     * - Wishiwashi: "school"
+     *
+     * Returns a list of possible aspects to try, with the most likely first.
      */
-    fun formNameToAspect(formName: String): String {
-        return formName
+    fun formNameToAspects(formName: String): List<String> {
+        val baseName = formName
             .lowercase()
-            .replace("-", "")
             .replace(" ", "")
             .replace("form", "")
             .replace("mode", "")
             .trim()
+
+        // Return possible aspect variations to try
+        return listOf(
+            "$baseName-mode",  // e.g., "zen-mode" for Darmanitan Zen Mode
+            "$baseName-form",  // e.g., "sunny-form" for Castform Sunny
+            baseName,          // e.g., "mega" for Mega Evolution, "school" for Wishiwashi
+            formName.lowercase().replace(" ", "-"),  // e.g., "zen-mode" if form name is "Zen Mode"
+            formName.lowercase().replace(" ", "")    // e.g., "zenmode" fallback
+        )
+    }
+
+    /**
+     * Legacy single-aspect conversion for backwards compatibility.
+     */
+    fun formNameToAspect(formName: String): String {
+        return formNameToAspects(formName).first()
     }
 
     /**
@@ -375,8 +422,28 @@ object BattleStateTracker {
         if (speciesId == null) return null
 
         val species = PokemonSpecies.getByIdentifier(speciesId) ?: return null
-        val aspect = formNameToAspect(formName)
-        val form = species.getForm(setOf(aspect))
+        val standardForm = species.standardForm
+
+        // Try multiple aspect variations to find the correct form
+        // Some Pokemon use "{name}-form" (Castform: sunny-form), others use just the name (mega)
+        val aspectsToTry = formNameToAspects(formName)
+        var form: FormData = standardForm
+        var foundForm = false
+
+        for (aspect in aspectsToTry) {
+            val candidateForm = species.getForm(setOf(aspect))
+            // Check if this form is different from the standard form (meaning we found a match)
+            if (candidateForm != standardForm || aspect == standardForm.aspects.firstOrNull()) {
+                form = candidateForm
+                foundForm = true
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Found form using aspect '$aspect'")
+                break
+            }
+        }
+
+        if (!foundForm) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Could not find form for '$formName', tried aspects: $aspectsToTry")
+        }
 
         // Update dynamic types with the new form's types
         val primaryType = form.primaryType?.name
@@ -571,6 +638,9 @@ object BattleStateTracker {
 
     private val playerSideConditions = ConcurrentHashMap<SideCondition, SideConditionState>()
     private val opponentSideConditions = ConcurrentHashMap<SideCondition, SideConditionState>()
+
+    // Track Terastallized Pokemon - UUID -> Tera type name (defensive type becomes only the Tera type)
+    private val terastallizedPokemon = ConcurrentHashMap<UUID, String>()
     private val volatileStatuses = ConcurrentHashMap<UUID, MutableSet<VolatileStatusState>>()
     // Maps lowercase name -> list of (UUID, isAlly) pairs to handle mirror matches
     private val nameToUuids = ConcurrentHashMap<String, MutableList<Pair<UUID, Boolean>>>()
@@ -746,6 +816,7 @@ object BattleStateTracker {
         dynamicTypes.clear()
         pokemonForms.clear()
         pokemonSpeciesIds.clear()
+        terastallizedPokemon.clear()
         BattleMessageInterceptor.clearMoveTracking()
         CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared all state")
     }
@@ -872,6 +943,28 @@ object BattleStateTracker {
 
     fun getPlayerSideConditions(): Map<SideCondition, SideConditionState> = playerSideConditions.toMap()
     fun getOpponentSideConditions(): Map<SideCondition, SideConditionState> = opponentSideConditions.toMap()
+
+    /**
+     * Swap all side conditions between player and opponent sides (Court Change).
+     * This swaps screens (Reflect, Light Screen, Aurora Veil), hazards (Stealth Rock, Spikes, etc.),
+     * and other side effects (Tailwind, Safeguard, etc.).
+     */
+    fun swapSideConditions() {
+        val playerCopy = playerSideConditions.toMap()
+        val opponentCopy = opponentSideConditions.toMap()
+
+        playerSideConditions.clear()
+        opponentSideConditions.clear()
+
+        playerSideConditions.putAll(opponentCopy)
+        opponentSideConditions.putAll(playerCopy)
+
+        CobblemonExtendedBattleUI.LOGGER.debug(
+            "BattleStateTracker: Court Change - swapped side conditions. " +
+            "Player now has: ${playerSideConditions.keys.map { it.displayName }}, " +
+            "Opponent now has: ${opponentSideConditions.keys.map { it.displayName }}"
+        )
+    }
 
     fun getSideConditionTurnsRemaining(isPlayerSide: Boolean, type: SideCondition): String? {
         val conditions = if (isPlayerSide) playerSideConditions else opponentSideConditions
@@ -1543,6 +1636,41 @@ object BattleStateTracker {
             CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Cleared revealed ability for UUID $uuid")
         }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Terastallization Tracking
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Mark a Pokemon as Terastallized with the given Tera type.
+     * When Terastallized, the Pokemon's defensive type becomes ONLY the Tera type.
+     */
+    fun setTerastallized(pokemonName: String, teraTypeName: String, preferAlly: Boolean? = null) {
+        val uuid = resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for Terastallization")
+            return
+        }
+        setTerastallized(uuid, teraTypeName)
+    }
+
+    /**
+     * Mark a Pokemon as Terastallized by UUID.
+     */
+    fun setTerastallized(uuid: UUID, teraTypeName: String) {
+        terastallizedPokemon[uuid] = teraTypeName
+        CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Marked UUID $uuid as Terastallized (type: $teraTypeName)")
+    }
+
+    /**
+     * Check if a Pokemon is Terastallized.
+     */
+    fun isTerastallized(uuid: UUID): Boolean = terastallizedPokemon.containsKey(uuid)
+
+    /**
+     * Get the Tera type name for a Terastallized Pokemon.
+     * Returns null if not Terastallized.
+     */
+    fun getTeraType(uuid: UUID): String? = terastallizedPokemon[uuid]
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Spectral Thief Handling

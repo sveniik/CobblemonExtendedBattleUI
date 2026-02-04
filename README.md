@@ -99,26 +99,6 @@ Alternatively, you can edit the config file manually:
 
 **Config file location:** `.minecraft/config/cobblemonextendedbattleui.json`
 
-### Feature Toggles
-
-| Setting | Default | Description |
-|---------|---------|-------------|
-| `enableTeamIndicators` | `true` | Pokemon model indicators below health bars with hover tooltips |
-| `enableBattleInfoPanel` | `true` | Weather, terrain, field effects, stat changes panel |
-| `enableBattleLog` | `true` | Custom battle log with damage percentages (replaces Cobblemon's chat log) |
-| `enableMoveTooltips` | `true` | Type effectiveness tooltips when hovering over moves. Disable if using Cobblemon Move Inspector. |
-
-### Example: Disable Move Tooltips (for Cobblemon Move Inspector users)
-
-```json
-{
-  "enableTeamIndicators": true,
-  "enableBattleInfoPanel": true,
-  "enableBattleLog": true,
-  "enableMoveTooltips": false
-}
-```
-
 When a feature is disabled, its associated background tracking is also disabled to save resources. Note that stat change tracking is shared between the Battle Info Panel and Team Indicator tooltips - it remains active if either feature is enabled.
 
 ## Requirements
@@ -128,6 +108,12 @@ When a feature is disabled, its associated background tracking is also disabled 
 - Fabric API
 - Fabric Language Kotlin
 - Cobblemon 1.7.0+
+
+## Known Issues
+There is a known incompatability with the current version of [Cobblemon UI Tweaks](https://modrinth.com/mod/cobblemon-ui-tweaks).
+This is not something that I am going to fix, as most of the features in that mod seem to be obsolete as of version 1.7 
+of Cobblemon or something that this mod already handles, like improving on the user-friendliness of the battle log. See
+more details [here](https://github.com/sveniik/CobblemonExtendedBattleUI/issues/13) and [here](https://github.com/sveniik/CobblemonExtendedBattleUI/issues/23).
 
 ## Notes
 

@@ -124,6 +124,12 @@ object BattleMessageInterceptor {
         "cobblemon.battle.activate.switcheroo"
     )
 
+    // Court Change: [user] - Swaps all side conditions between the two sides
+    private const val COURT_CHANGE_KEY = "cobblemon.battle.activate.courtchange"
+
+    // Terastallize: [pokemon, teraType] - Pokemon Terastallized into a type
+    private const val TERASTALLIZE_KEY = "cobblemon.battle.terastallize"
+
     // Item reveal with different arg order: [target, item, user]
     private const val FRISK_KEY = "cobblemon.battle.item.frisk"
 
@@ -696,6 +702,26 @@ object BattleMessageInterceptor {
             SIDE_END_KEYS[key]?.let { (condition, isAlly) ->
                 BattleStateTracker.clearSideCondition(isAlly, condition)
                 return
+            }
+
+            // Court Change: Swap all side conditions between the two sides
+            if (key == COURT_CHANGE_KEY) {
+                BattleStateTracker.swapSideConditions()
+                if (args.isNotEmpty()) {
+                    val pokemonName = argToString(args[0])
+                    BattleStateTracker.addRevealedMove(pokemonName, "Court Change", null)
+                }
+                // Don't return - let BattleLog display it
+            }
+
+            // Terastallization: Mark Pokemon as Terastallized with their Tera type
+            // This changes their defensive type to ONLY the Tera type
+            if (key == TERASTALLIZE_KEY && args.size >= 2) {
+                val pokemonName = argToString(args[0])
+                val teraType = argToString(args[1])
+                BattleStateTracker.setTerastallized(pokemonName, teraType)
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: $pokemonName Terastallized into $teraType type")
+                // Don't return - let BattleLog display it
             }
 
             VOLATILE_START_KEYS[key]?.let { volatileStatus ->

@@ -190,15 +190,17 @@ object MoveTooltipRenderer {
         val lines = mutableListOf<List<Pair<String, Int>>>()
         val template = move.moveTemplate
 
-        // Get effective type (handles Hidden Power, Pixilate, etc.)
+        // Get effective type (handles Hidden Power, Pixilate, Weather Ball, etc.)
         val effectiveType = getMoveEffectiveType(move)
-        val typeColor = UIUtils.getTypeColor(effectiveType)
+        val weatherBallType = getWeatherBallEffectiveType(template)
+        val displayType = weatherBallType ?: effectiveType
+        val typeColor = UIUtils.getTypeColor(displayType)
 
         // Move name
         lines.add(listOf(template.displayName.string to typeColor))
 
-        // Type and Category
-        val typeName = effectiveType.displayName.string
+        // Type and Category - show weather-modified type for Weather Ball
+        val typeName = displayType.displayName.string
         val categoryName = template.damageCategory.displayName.string
         val categoryColor = when (template.damageCategory) {
             DamageCategories.PHYSICAL -> COLOR_PHYSICAL
@@ -211,22 +213,35 @@ object MoveTooltipRenderer {
             categoryName to categoryColor
         ))
 
-        // Power with STAB, Sheer Force, and held item calculation
+        // Power with STAB, Sheer Force, held item, and dynamic move calculations
         if (template.power > 0) {
-            val basePower = template.power.toInt()
+            var basePower = template.power.toInt()
             val playerTypes = getPlayerPokemonTypes()
             val playerAbility = getPlayerPokemonAbility()
-            val hasStab = playerTypes.any { it.name == effectiveType.name }
+
+            // Dynamic power calculations for special moves
+            val dynamicPowerInfo = getDynamicPowerInfo(template)
+            if (dynamicPowerInfo != null) {
+                basePower = dynamicPowerInfo.power
+            }
+
+            // Use the weather-modified type for STAB calculation if applicable
+            val stabCheckType = weatherBallType ?: effectiveType
+            val hasStab = playerTypes.any { it.name == stabCheckType.name }
             val hasSheerForce = playerAbility == "sheerforce" &&
                 template.effectChances.isNotEmpty() && template.effectChances[0] > 0
 
-            // Check for held item power boost
-            val itemBoost = getHeldItemPowerBoost(effectiveType.name)
-
+            // Check for held item power boost (use weather-modified type for Weather Ball)
+            val itemBoost = getHeldItemPowerBoost(stabCheckType.name)
 
             // Calculate effective power with modifiers
-            var effectivePower = template.power
+            var effectivePower = basePower.toDouble()
             val modifiers = mutableListOf<String>()
+
+            // Add dynamic power modifier first (e.g., "Status" for Hex, "Weather" for Weather Ball)
+            if (dynamicPowerInfo?.reason != null) {
+                modifiers.add(dynamicPowerInfo.reason)
+            }
 
             if (hasStab) {
                 effectivePower *= 1.5
@@ -241,12 +256,25 @@ object MoveTooltipRenderer {
                 modifiers.add(itemBoost.displayName)
             }
 
+            // Show base vs calculated power
+            val displayBasePower = template.power.toInt()  // Original base power
             if (modifiers.isNotEmpty()) {
                 val modifierText = modifiers.joinToString(" + ")
-                lines.add(listOf(
-                    "Power: $basePower " to COLOR_POWER,
-                    "($modifierText: ${effectivePower.toInt()})" to SUPER_EFFECTIVE_2X
-                ))
+                if (dynamicPowerInfo != null && basePower != displayBasePower) {
+                    // Show original base power, then dynamic+modifier calculation
+                    lines.add(listOf(
+                        "Power: $displayBasePower → $basePower " to COLOR_POWER,
+                        "($modifierText: ${effectivePower.toInt()})" to SUPER_EFFECTIVE_2X
+                    ))
+                } else {
+                    lines.add(listOf(
+                        "Power: $basePower " to COLOR_POWER,
+                        "($modifierText: ${effectivePower.toInt()})" to SUPER_EFFECTIVE_2X
+                    ))
+                }
+            } else if (dynamicPowerInfo != null && basePower != displayBasePower) {
+                // Show power change without other modifiers
+                lines.add(listOf("Power: $displayBasePower → $basePower" to COLOR_POWER))
             } else {
                 lines.add(listOf("Power: $basePower" to COLOR_POWER))
             }
@@ -388,8 +416,10 @@ object MoveTooltipRenderer {
         val opponents = opponentSide.activeClientBattlePokemon.mapNotNull { it.battlePokemon }
         if (opponents.isEmpty()) return emptyList()
 
-        // Get effective move type (handles Hidden Power, Pixilate, etc.)
-        val moveType = getMoveEffectiveType(move)
+        // Get effective move type (handles Hidden Power, Pixilate, Weather Ball, etc.)
+        val baseType = getMoveEffectiveType(move)
+        val weatherBallType = getWeatherBallEffectiveType(move.moveTemplate)
+        val moveType = weatherBallType ?: baseType
         val isStatusMove = move.moveTemplate.damageCategory == DamageCategories.STATUS
 
         for (opponent in opponents) {
@@ -465,6 +495,9 @@ object MoveTooltipRenderer {
     /**
      * Get the types of the player's active Pokemon for STAB calculation.
      * Uses dynamic type state if available (handles Burn Up, Soak, Protean, etc.)
+     *
+     * When Terastallized, the Pokemon gains STAB on the Tera type IN ADDITION to their
+     * original types. This is different from defensive typing where only the Tera type matters.
      */
     private fun getPlayerPokemonTypes(): List<ElementalType> {
         val battle = CobblemonClient.battle ?: return emptyList()
@@ -473,11 +506,11 @@ object MoveTooltipRenderer {
         val clientBattlePokemon = playerSide.activeClientBattlePokemon.firstOrNull()?.battlePokemon ?: return emptyList()
         val pokemonUuid = clientBattlePokemon.uuid
 
+        val types = mutableListOf<ElementalType>()
+
         // Check for dynamic type changes (Burn Up, Soak, Protean, Trick-or-Treat, etc.)
         val dynamicTypes = BattleStateTracker.getDynamicTypes(pokemonUuid)
         if (dynamicTypes != null) {
-            val types = mutableListOf<ElementalType>()
-
             // Add primary type if not lost
             dynamicTypes.primaryType?.let { typeName ->
                 ElementalTypes.get(typeName.lowercase())?.let { types.add(it) }
@@ -492,15 +525,26 @@ object MoveTooltipRenderer {
             for (addedType in dynamicTypes.addedTypes) {
                 ElementalTypes.get(addedType.lowercase())?.let { types.add(it) }
             }
-
-            return types
+        } else {
+            // Fallback: Get form-specific types using species + aspects
+            val species = clientBattlePokemon.species
+            val aspects = clientBattlePokemon.state.currentAspects
+            val form = species.getForm(aspects)
+            form.primaryType?.let { types.add(it) }
+            form.secondaryType?.let { types.add(it) }
         }
 
-        // Fallback: Get form-specific types using species + aspects
-        val species = clientBattlePokemon.species
-        val aspects = clientBattlePokemon.state.currentAspects
-        val form = species.getForm(aspects)
-        return listOfNotNull(form.primaryType, form.secondaryType)
+        // Check for Terastallization - adds STAB on Tera type IN ADDITION to original types
+        // (Unlike defense where Tera type replaces original types)
+        val teraType = BattleStateTracker.getTeraType(pokemonUuid)
+        if (teraType != null) {
+            val teraElementalType = ElementalTypes.get(teraType.lowercase())
+            if (teraElementalType != null && !types.contains(teraElementalType)) {
+                types.add(teraElementalType)
+            }
+        }
+
+        return types
     }
 
     /**
@@ -517,13 +561,24 @@ object MoveTooltipRenderer {
     }
 
     /**
-     * Get the effective types of an opponent Pokemon, checking dynamic type state first.
-     * Handles Soak, Protean, Burn Up, Trick-or-Treat, Forest's Curse, etc.
+     * Get the effective types of an opponent Pokemon, checking Terastallization and dynamic type state.
+     * Priority: Terastallization > Dynamic types (Soak, Burn Up, etc.) > Form types
+     *
+     * When Terastallized, a Pokemon's defensive type becomes ONLY their Tera type.
      */
     private fun getOpponentEffectiveTypes(opponent: com.cobblemon.mod.common.client.battle.ClientBattlePokemon): List<ElementalType> {
         val pokemonUuid = opponent.uuid
 
-        // Check for dynamic type changes (Soak, Protean, Burn Up, Trick-or-Treat, etc.)
+        // Priority 1: Check if Terastallized - defensive type becomes ONLY the Tera type
+        val teraType = BattleStateTracker.getTeraType(pokemonUuid)
+        if (teraType != null) {
+            val elementalType = ElementalTypes.get(teraType.lowercase())
+            if (elementalType != null) {
+                return listOf(elementalType)
+            }
+        }
+
+        // Priority 2: Check for dynamic type changes (Soak, Protean, Burn Up, Trick-or-Treat, etc.)
         val dynamicTypes = BattleStateTracker.getDynamicTypes(pokemonUuid)
         if (dynamicTypes != null) {
             val types = mutableListOf<ElementalType>()
@@ -651,6 +706,92 @@ object MoveTooltipRenderer {
         val playerSide = if (battle.side1.actors.any { it.uuid == playerUUID }) battle.side1 else battle.side2
         val battlePokemon = playerSide.activeClientBattlePokemon.firstOrNull()?.battlePokemon ?: return null
         return CobblemonClient.storage.party.findByUUID(battlePokemon.uuid)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Dynamic Move Calculations (Hex, Weather Ball, etc.)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Data class for dynamic power information.
+     */
+    private data class DynamicPowerInfo(
+        val power: Int,
+        val reason: String?  // e.g., "Status" for Hex, "Rain" for Weather Ball
+    )
+
+    /**
+     * Get Weather Ball's effective type based on current weather.
+     * Returns null if no weather is active (uses base Normal type).
+     */
+    private fun getWeatherBallEffectiveType(template: MoveTemplate): ElementalType? {
+        if (template.name.lowercase() != "weatherball") return null
+
+        val weather = BattleStateTracker.weather ?: return null
+
+        return when (weather.type) {
+            BattleStateTracker.Weather.RAIN -> ElementalTypes.get("water")
+            BattleStateTracker.Weather.SUN -> ElementalTypes.get("fire")
+            BattleStateTracker.Weather.SANDSTORM -> ElementalTypes.get("rock")
+            BattleStateTracker.Weather.HAIL, BattleStateTracker.Weather.SNOW -> ElementalTypes.get("ice")
+        }
+    }
+
+    /**
+     * Get dynamic power info for moves with conditional power changes.
+     * Currently handles:
+     * - Hex: Doubles power (65 → 130) when target has a status condition
+     * - Weather Ball: Doubles power (50 → 100) when weather is active
+     */
+    private fun getDynamicPowerInfo(template: MoveTemplate): DynamicPowerInfo? {
+        val moveName = template.name.lowercase()
+
+        return when (moveName) {
+            "hex" -> getHexDynamicPower(template)
+            "weatherball" -> getWeatherBallDynamicPower(template)
+            else -> null
+        }
+    }
+
+    /**
+     * Get Hex's dynamic power. Doubles to 130 when any opponent has a status condition.
+     */
+    private fun getHexDynamicPower(template: MoveTemplate): DynamicPowerInfo? {
+        val basePower = template.power.toInt()
+
+        val battle = CobblemonClient.battle ?: return null
+        val playerUUID = MinecraftClient.getInstance().player?.uuid ?: return null
+        val playerSide = battle.side1.actors.any { it.uuid == playerUUID }
+        val opponentSide = if (playerSide) battle.side2 else battle.side1
+
+        // Check if any opponent has a status condition
+        val opponentHasStatus = opponentSide.activeClientBattlePokemon
+            .mapNotNull { it.battlePokemon }
+            .any { it.status != null }
+
+        return if (opponentHasStatus) {
+            DynamicPowerInfo(basePower * 2, "Status")  // 65 → 130
+        } else {
+            null  // No change from base power
+        }
+    }
+
+    /**
+     * Get Weather Ball's dynamic power. Doubles to 100 when weather is active.
+     */
+    private fun getWeatherBallDynamicPower(template: MoveTemplate): DynamicPowerInfo? {
+        val basePower = template.power.toInt()
+        val weather = BattleStateTracker.weather ?: return null
+
+        val weatherName = when (weather.type) {
+            BattleStateTracker.Weather.RAIN -> "Rain"
+            BattleStateTracker.Weather.SUN -> "Sun"
+            BattleStateTracker.Weather.SANDSTORM -> "Sandstorm"
+            BattleStateTracker.Weather.HAIL -> "Hail"
+            BattleStateTracker.Weather.SNOW -> "Snow"
+        }
+
+        return DynamicPowerInfo(basePower * 2, weatherName)  // 50 → 100
     }
 
     /**

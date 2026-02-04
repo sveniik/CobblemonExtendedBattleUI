@@ -213,7 +213,9 @@ object TeamIndicatorUI {
         val teraType: TeraType? = null,
         val form: FormData? = null,
         val lostPrimaryType: Boolean = false,  // True if primary type was lost (show "???")
-        val addedTypes: List<String> = emptyList()  // Types added by moves (Trick-or-Treat, Forest's Curse)
+        val addedTypes: List<String> = emptyList(),  // Types added by moves (Trick-or-Treat, Forest's Curse)
+        val isTerastallized: Boolean = false,  // True if Pokemon is currently Terastallized
+        val activeTeraTypeName: String? = null  // The active Tera type name when Terastallized
     )
 
     // Currently rendered pokeball bounds (refreshed each frame)
@@ -250,6 +252,9 @@ object TeamIndicatorUI {
     private var dragStartMouseY = 0
     private var dragStartPanelX = 0
     private var dragStartPanelY = 0
+    // For Alt+drag mirrored movement - store the OTHER panel's starting position
+    private var dragStartOtherPanelX = 0
+    private var dragStartOtherPanelY = 0
 
     // Click/double-click detection
     private var lastClickTime = 0L
@@ -1201,8 +1206,10 @@ object TeamIndicatorUI {
         val rightSide = if (leftSide == battle.side1) battle.side2 else battle.side1
 
         // Update tracked Pokemon for both sides from battle data
-        updateTrackedPokemonForSide(leftSide, trackedSide1Pokemon, isLeftSide = true)
-        updateTrackedPokemonForSide(rightSide, trackedSide2Pokemon, isLeftSide = false)
+        // When spectating, neither side is considered "player's side"
+        val leftSideIsPlayer = !isSpectating  // Left side is player's side when not spectating
+        updateTrackedPokemonForSide(leftSide, trackedSide1Pokemon, isLeftSide = true, isPlayerSide = leftSideIsPlayer)
+        updateTrackedPokemonForSide(rightSide, trackedSide2Pokemon, isLeftSide = false, isPlayerSide = false)
 
         // Check for transformed Pokemon that switched out (no longer active)
         // This is needed because switch messages only contain the INCOMING Pokemon name,
@@ -1357,6 +1364,8 @@ object TeamIndicatorUI {
         val isMouseDown = GLFW.glfwGetMouseButton(handle, GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS
         val isShiftDown = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_SHIFT) == GLFW.GLFW_PRESS ||
             GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_SHIFT) == GLFW.GLFW_PRESS
+        val isAltDown = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_ALT) == GLFW.GLFW_PRESS ||
+            GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_ALT) == GLFW.GLFW_PRESS
 
         val repositioningEnabled = PanelConfig.teamIndicatorRepositioningEnabled
 
@@ -1373,6 +1382,21 @@ object TeamIndicatorUI {
                     PanelConfig.setTeamIndicatorLeftPosition(newX, newY)
                 } else {
                     PanelConfig.setTeamIndicatorRightPosition(newX, newY)
+                }
+
+                // Alt+drag: Also move the OTHER panel with mirrored X movement (same Y)
+                // This helps users align both panels symmetrically
+                if (isAltDown) {
+                    // Mirrored X: if we move right (+deltaX), other panel moves left (-deltaX)
+                    // Same Y: both panels move in the same vertical direction
+                    val mirroredX = (dragStartOtherPanelX - deltaX).coerceIn(0, mc.window.scaledWidth - modelSize)
+                    val sameY = (dragStartOtherPanelY + deltaY).coerceIn(0, mc.window.scaledHeight - modelSize)
+
+                    if (draggingLeftSide) {
+                        PanelConfig.setTeamIndicatorRightPosition(mirroredX, sameY)
+                    } else {
+                        PanelConfig.setTeamIndicatorLeftPosition(mirroredX, sameY)
+                    }
                 }
             } else {
                 // Mouse released - end drag
@@ -1409,20 +1433,28 @@ object TeamIndicatorUI {
             val currentTime = System.currentTimeMillis()
 
             if (isShiftDown) {
-                // Shift+Click: Toggle orientation
+                // Shift+Click: Toggle orientation (Alt+Shift+Click affects both panels - same orientation)
                 PanelConfig.toggleTeamIndicatorOrientation()
                 PanelConfig.save()
+                // Note: Orientation is a global setting, so it already affects both panels
             } else {
                 // Check for double-click
                 val isDoubleClick = (currentTime - lastClickTime) < DOUBLE_CLICK_THRESHOLD_MS &&
                     lastClickSide == hoveredSide
 
                 if (isDoubleClick) {
-                    // Double-click: Reset position for this side
-                    if (hoveredSide) {
+                    // Double-click: Reset position
+                    if (isAltDown) {
+                        // Alt+Double-click: Reset BOTH panels
                         PanelConfig.resetTeamIndicatorLeftPosition()
-                    } else {
                         PanelConfig.resetTeamIndicatorRightPosition()
+                    } else {
+                        // Regular double-click: Reset only this side
+                        if (hoveredSide) {
+                            PanelConfig.resetTeamIndicatorLeftPosition()
+                        } else {
+                            PanelConfig.resetTeamIndicatorRightPosition()
+                        }
                     }
                     PanelConfig.save()
 
@@ -1440,6 +1472,11 @@ object TeamIndicatorUI {
                     val bounds = if (hoveredSide) leftTeamPanelBounds else rightTeamPanelBounds
                     dragStartPanelX = bounds?.x?.plus(PANEL_PADDING_H) ?: mouseX
                     dragStartPanelY = bounds?.y?.plus(PANEL_PADDING_V) ?: mouseY
+
+                    // Also store the OTHER panel's position for Alt+drag mirrored movement
+                    val otherBounds = if (hoveredSide) rightTeamPanelBounds else leftTeamPanelBounds
+                    dragStartOtherPanelX = otherBounds?.x?.plus(PANEL_PADDING_H) ?: (mc.window.scaledWidth - mouseX)
+                    dragStartOtherPanelY = otherBounds?.y?.plus(PANEL_PADDING_V) ?: mouseY
 
                     // Record click for double-click detection
                     lastClickTime = currentTime
@@ -1464,7 +1501,8 @@ object TeamIndicatorUI {
     private fun updateTrackedPokemonForSide(
         side: ClientBattleSide,
         tracked: ConcurrentHashMap<UUID, TrackedPokemon>,
-        isLeftSide: Boolean
+        isLeftSide: Boolean,
+        isPlayerSide: Boolean = isLeftSide  // Default: left side is player's side (unless spectating)
     ) {
         val currentlyActiveUuids = mutableSetOf<UUID>()
 
@@ -1472,7 +1510,7 @@ object TeamIndicatorUI {
             for (activePokemon in actor.activePokemon) {
                 val battlePokemon = activePokemon.battlePokemon ?: continue
                 currentlyActiveUuids.add(battlePokemon.uuid)
-                updateTrackedPokemonInMap(battlePokemon, tracked)
+                updateTrackedPokemonInMap(battlePokemon, tracked, isPlayerSide)
             }
         }
 
@@ -1581,7 +1619,8 @@ object TeamIndicatorUI {
      */
     private fun updateTrackedPokemonInMap(
         battlePokemon: ClientBattlePokemon,
-        targetMap: ConcurrentHashMap<UUID, TrackedPokemon>
+        targetMap: ConcurrentHashMap<UUID, TrackedPokemon>,
+        isAlly: Boolean = true
     ) {
         val uuid = battlePokemon.uuid
         // For opponent Pokemon, hpValue is already a 0.0-1.0 percentage (isHpFlat = false)
@@ -1612,6 +1651,16 @@ object TeamIndicatorUI {
         // Register species ID with BattleStateTracker for form lookup
         if (speciesId != null) {
             BattleStateTracker.registerSpeciesId(uuid, speciesId)
+        }
+
+        // Register Pokemon with BattleStateTracker for name-to-UUID resolution
+        // This is needed for Terastallization tracking and other message-based updates
+        if (displayName.isNotEmpty()) {
+            BattleStateTracker.registerPokemon(uuid, displayName, isAlly)
+        }
+        // Also register under species name for robust lookup (messages may use either)
+        if (speciesName != null) {
+            BattleStateTracker.registerPokemon(uuid, speciesName, isAlly)
         }
 
         // Check if this Pokemon has a pending transform (Impostor triggered before tracking)
@@ -2396,6 +2445,8 @@ object TeamIndicatorUI {
                 add(Pair("  •  ", ""))
             }
             add(Pair("Ctrl+Scroll", ": Scale"))
+            add(Pair("  •  ", ""))
+            add(Pair("Alt", ": Both"))
         }
 
         // Calculate dimensions
@@ -2734,6 +2785,10 @@ object TeamIndicatorUI {
         val teraType = if (battlePokemon != null) battlePokemon.teraType
         else trackedPokemon?.teraType
 
+        // Check if this Pokemon is ACTIVELY Terastallized (from battle message tracking)
+        val activeTeraTypeName = BattleStateTracker.getTeraType(uuid)
+        val isTerastallized = activeTeraTypeName != null
+
         return TooltipData(
             uuid = uuid,
             pokemonName = name,
@@ -2760,7 +2815,9 @@ object TeamIndicatorUI {
             teraType = teraType,
             form = effectiveForm,
             lostPrimaryType = lostPrimaryType,
-            addedTypes = addedTypes
+            addedTypes = addedTypes,
+            isTerastallized = isTerastallized,
+            activeTeraTypeName = activeTeraTypeName
         )
     }
 
@@ -2777,66 +2834,100 @@ object TeamIndicatorUI {
         // Build tooltip lines: each line is a list of (text, color) segments
         val lines = mutableListOf<List<Pair<String, Int>>>()
 
-        val nameColor = data.primaryType?.let { UIUtils.getTypeColor(it) } ?: TOOLTIP_HEADER
+        // Name color: use Tera type if Terastallized, otherwise primary type
+        val nameColor = if (data.isTerastallized && data.activeTeraTypeName != null) {
+            ElementalTypes.get(data.activeTeraTypeName.lowercase())?.let { UIUtils.getTypeColor(it) } ?: TOOLTIP_HEADER
+        } else {
+            data.primaryType?.let { UIUtils.getTypeColor(it) } ?: TOOLTIP_HEADER
+        }
         lines.add(listOf(data.pokemonName to nameColor))
 
         // Types
+        // When Terastallized, show the active Tera type as the main type (since it becomes the defensive type)
         // Note: A Pokemon can be completely typeless (e.g., after Burn Up on a mono-Fire type).
         // When a dual-type Pokemon loses one type (e.g., Pawmot using Double Shock), show only
         // the remaining type - don't show "???" unless the Pokemon has NO types at all.
-        val hasAnyTypeInfo = data.primaryType != null || data.lostPrimaryType || data.secondaryType != null || data.addedTypes.isNotEmpty()
-        val isCompletelyTypeless = data.primaryType == null && data.secondaryType == null && data.addedTypes.isEmpty()
-
-        if (hasAnyTypeInfo || isCompletelyTypeless) {
+        if (data.isTerastallized && data.activeTeraTypeName != null) {
+            // Pokemon is currently Terastallized - show Tera type as main type
+            val teraElementalType = ElementalTypes.get(data.activeTeraTypeName.lowercase())
             val typeSegments = mutableListOf<Pair<String, Int>>()
 
-            // Primary type - only show "???" if COMPLETELY typeless (no secondary or added types either)
-            if (data.primaryType != null) {
-                typeSegments.add(data.primaryType.displayName.string to UIUtils.getTypeColor(data.primaryType))
-            } else if (isCompletelyTypeless) {
-                // Only show "???" when Pokemon has NO types at all (e.g., mono-Fire after Burn Up)
-                typeSegments.add("???" to TOOLTIP_DIM)
-            }
-            // If primary is null but secondary exists (e.g., Pawmot after Double Shock), skip primary entirely
-
-            // Secondary type
-            if (data.secondaryType != null) {
-                if (typeSegments.isNotEmpty()) {
-                    typeSegments.add(" / " to TOOLTIP_DIM)
-                }
-                typeSegments.add(data.secondaryType.displayName.string to UIUtils.getTypeColor(data.secondaryType))
+            // Show "Tera [Type]" as the active type
+            typeSegments.add("Tera " to TOOLTIP_LABEL)
+            if (teraElementalType != null) {
+                typeSegments.add(teraElementalType.displayName.string to UIUtils.getTypeColor(teraElementalType))
+            } else {
+                typeSegments.add(data.activeTeraTypeName to TOOLTIP_TEXT)
             }
 
-            // Added types (from Trick-or-Treat, Forest's Curse)
-            for (addedType in data.addedTypes) {
-                if (typeSegments.isNotEmpty()) {
-                    typeSegments.add(" + " to TOOLTIP_DIM)
+            // Show original types in parentheses (dimmed)
+            val originalTypes = mutableListOf<String>()
+            data.primaryType?.let { originalTypes.add(it.displayName.string) }
+            data.secondaryType?.let { originalTypes.add(it.displayName.string) }
+            if (originalTypes.isNotEmpty()) {
+                typeSegments.add(" (was " to TOOLTIP_DIM)
+                typeSegments.add(originalTypes.joinToString("/") to TOOLTIP_DIM)
+                typeSegments.add(")" to TOOLTIP_DIM)
+            }
+
+            lines.add(typeSegments)
+        } else {
+            // Normal type display (not Terastallized)
+            val hasAnyTypeInfo = data.primaryType != null || data.lostPrimaryType || data.secondaryType != null || data.addedTypes.isNotEmpty()
+            val isCompletelyTypeless = data.primaryType == null && data.secondaryType == null && data.addedTypes.isEmpty()
+
+            if (hasAnyTypeInfo || isCompletelyTypeless) {
+                val typeSegments = mutableListOf<Pair<String, Int>>()
+
+                // Primary type - only show "???" if COMPLETELY typeless (no secondary or added types either)
+                if (data.primaryType != null) {
+                    typeSegments.add(data.primaryType.displayName.string to UIUtils.getTypeColor(data.primaryType))
+                } else if (isCompletelyTypeless) {
+                    // Only show "???" when Pokemon has NO types at all (e.g., mono-Fire after Burn Up)
+                    typeSegments.add("???" to TOOLTIP_DIM)
                 }
-                // Look up ElementalType for color, fall back to default if not found
-                val elementalType = ElementalTypes.get(addedType.lowercase())
+                // If primary is null but secondary exists (e.g., Pawmot after Double Shock), skip primary entirely
+
+                // Secondary type
+                if (data.secondaryType != null) {
+                    if (typeSegments.isNotEmpty()) {
+                        typeSegments.add(" / " to TOOLTIP_DIM)
+                    }
+                    typeSegments.add(data.secondaryType.displayName.string to UIUtils.getTypeColor(data.secondaryType))
+                }
+
+                // Added types (from Trick-or-Treat, Forest's Curse)
+                for (addedType in data.addedTypes) {
+                    if (typeSegments.isNotEmpty()) {
+                        typeSegments.add(" + " to TOOLTIP_DIM)
+                    }
+                    // Look up ElementalType for color, fall back to default if not found
+                    val elementalType = ElementalTypes.get(addedType.lowercase())
+                    if (elementalType != null) {
+                        typeSegments.add(elementalType.displayName.string to UIUtils.getTypeColor(elementalType))
+                    } else {
+                        typeSegments.add(addedType to TOOLTIP_TEXT)
+                    }
+                }
+
+                if (typeSegments.isNotEmpty()) {
+                    lines.add(typeSegments)
+                }
+            }
+
+            // Tera Type (only show if known, enabled in settings, and NOT actively Terastallized)
+            // When Terastallized, we already show it above as the main type
+            if (PanelConfig.showTeraType && data.teraType != null) {
+                val typeSegments = mutableListOf<Pair<String, Int>>()
+                typeSegments.add("Tera Type: " to TOOLTIP_LABEL)
+                val elementalType = ElementalTypes.get(data.teraType.showdownId())
                 if (elementalType != null) {
                     typeSegments.add(elementalType.displayName.string to UIUtils.getTypeColor(elementalType))
                 } else {
-                    typeSegments.add(addedType to TOOLTIP_TEXT)
+                    typeSegments.add(data.teraType.name to TOOLTIP_TEXT)
                 }
-            }
-
-            if (typeSegments.isNotEmpty()) {
                 lines.add(typeSegments)
             }
-        }
-
-        // Tera Type (only show if known and enabled in settings)
-        if (PanelConfig.showTeraType && data.teraType != null) {
-            val typeSegments = mutableListOf<Pair<String, Int>>()
-            typeSegments.add("Tera Type: " to TOOLTIP_LABEL)
-            val elementalType = ElementalTypes.get(data.teraType.showdownId())
-            if (elementalType != null) {
-                typeSegments.add(elementalType.displayName.string to UIUtils.getTypeColor(elementalType))
-            } else {
-                typeSegments.add(data.teraType.name to TOOLTIP_TEXT)
-            }
-            lines.add(typeSegments)
         }
 
         // Ability

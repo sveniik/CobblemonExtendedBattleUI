@@ -101,6 +101,16 @@ Alternatively, you can edit the config file manually:
 
 When a feature is disabled, its associated background tracking is also disabled to save resources. Note that stat change tracking is shared between the Battle Info Panel and Team Indicator tooltips - it remains active if either feature is enabled.
 
+## Translations
+
+The mod works in any language, but the UI elements are only configured to show in English by default.
+
+Want to translate the mod's UI text? See the [Translation Guide](https://github.com/sveniik/CobblemonExtendedBattleUI/blob/main/TRANSLATIONS.md) for instructions on creating a translation resource pack.
+
+**Community Translations:**
+
+If you've created a translation, [open an issue](https://github.com/sveniik/CobblemonExtendedBattleUI/issues) to share it and I'll link it here!
+
 ## Requirements
 
 - Minecraft 1.21.1
@@ -120,7 +130,7 @@ more details [here](https://github.com/sveniik/CobblemonExtendedBattleUI/issues/
 - This is a **client-side only** mod - it works in singleplayer and on servers without the server needing it
 - The opponent's full team isn't shown until they send out each Pokemon. This is intended.
 - Weather/terrain/screen durations show ranges because we can't know if the opponent has duration-extending items
-- When spectating, some information - moves, items, stat changes - are only shown when revealed after you started 
+- When spectating, some information - moves, items, stat changes - are only shown when revealed after you started
 watching
 
 ## License

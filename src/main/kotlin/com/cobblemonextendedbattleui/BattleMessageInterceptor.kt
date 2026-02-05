@@ -28,7 +28,32 @@ object BattleMessageInterceptor {
         "cobblemon.battle.unboost.severe" to 3
     )
 
-    // Maps displayed stat names to BattleStat enum
+    // Maps Cobblemon stat translation KEYS to BattleStat enum (language-independent)
+    private val STAT_KEY_MAPPING = mapOf(
+        "cobblemon.stat.attack" to BattleStateTracker.BattleStat.ATTACK,
+        "cobblemon.stat.atk" to BattleStateTracker.BattleStat.ATTACK,
+        "cobblemon.stat.defense" to BattleStateTracker.BattleStat.DEFENSE,
+        "cobblemon.stat.defence" to BattleStateTracker.BattleStat.DEFENSE,
+        "cobblemon.stat.def" to BattleStateTracker.BattleStat.DEFENSE,
+        "cobblemon.stat.special_attack" to BattleStateTracker.BattleStat.SPECIAL_ATTACK,
+        "cobblemon.stat.specialattack" to BattleStateTracker.BattleStat.SPECIAL_ATTACK,
+        "cobblemon.stat.spa" to BattleStateTracker.BattleStat.SPECIAL_ATTACK,
+        "cobblemon.stat.sp_atk" to BattleStateTracker.BattleStat.SPECIAL_ATTACK,
+        "cobblemon.stat.special_defense" to BattleStateTracker.BattleStat.SPECIAL_DEFENSE,
+        "cobblemon.stat.specialdefense" to BattleStateTracker.BattleStat.SPECIAL_DEFENSE,
+        "cobblemon.stat.special_defence" to BattleStateTracker.BattleStat.SPECIAL_DEFENSE,
+        "cobblemon.stat.spd" to BattleStateTracker.BattleStat.SPECIAL_DEFENSE,
+        "cobblemon.stat.sp_def" to BattleStateTracker.BattleStat.SPECIAL_DEFENSE,
+        "cobblemon.stat.speed" to BattleStateTracker.BattleStat.SPEED,
+        "cobblemon.stat.spe" to BattleStateTracker.BattleStat.SPEED,
+        "cobblemon.stat.accuracy" to BattleStateTracker.BattleStat.ACCURACY,
+        "cobblemon.stat.acc" to BattleStateTracker.BattleStat.ACCURACY,
+        "cobblemon.stat.evasion" to BattleStateTracker.BattleStat.EVASION,
+        "cobblemon.stat.evasiveness" to BattleStateTracker.BattleStat.EVASION,
+        "cobblemon.stat.eva" to BattleStateTracker.BattleStat.EVASION
+    )
+
+    // Fallback: Maps displayed stat names to BattleStat enum (English only, for compatibility)
     private val STAT_NAME_MAPPING = mapOf(
         "attack" to BattleStateTracker.BattleStat.ATTACK,
         "defense" to BattleStateTracker.BattleStat.DEFENSE,
@@ -1081,6 +1106,25 @@ object BattleMessageInterceptor {
         }
     }
 
+    /**
+     * Extract the translation key from an argument if it's a TranslatableTextContent.
+     * Returns null if it's not translatable (plain string, etc.)
+     */
+    private fun argToTranslationKey(arg: Any): String? {
+        return when (arg) {
+            is Text -> {
+                val content = arg.content
+                if (content is TranslatableTextContent) {
+                    content.key
+                } else {
+                    null
+                }
+            }
+            is TranslatableTextContent -> arg.key
+            else -> null
+        }
+    }
+
     // Args: [pokemonName, statName]. stages > 0 for boost, < 0 for drop.
     private fun extractBoost(args: Array<out Any>, stages: Int) {
         if (args.size < 2) {
@@ -1089,13 +1133,22 @@ object BattleMessageInterceptor {
         }
 
         val pokemonName = argToString(args[0])
-        val statName = argToString(args[1])
 
-        CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Boost parsing - pokemon='$pokemonName', stat='$statName', stages=$stages")
+        // First try to get stat from translation key (language-independent)
+        val statKey = argToTranslationKey(args[1])
+        var stat = statKey?.let { STAT_KEY_MAPPING[it] }
 
-        val stat = STAT_NAME_MAPPING[statName.lowercase()] ?: run {
-            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Unknown stat name: '$statName' (lowercase: '${statName.lowercase()}')")
-            return
+        // If no translation key or key not found, fall back to string matching (English only)
+        if (stat == null) {
+            val statName = argToString(args[1])
+            stat = STAT_NAME_MAPPING[statName.lowercase()]
+            if (stat == null) {
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Unknown stat - key='$statKey', name='$statName'")
+                return
+            }
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Boost parsing (string fallback) - pokemon='$pokemonName', stat='$statName', stages=$stages")
+        } else {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Boost parsing (key match) - pokemon='$pokemonName', key='$statKey', stages=$stages")
         }
 
         CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: $pokemonName ${stat.abbr} ${if (stages > 0) "+" else ""}$stages")

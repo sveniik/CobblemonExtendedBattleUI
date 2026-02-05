@@ -5,6 +5,7 @@ import com.cobblemon.mod.common.client.battle.ClientBattleSide
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.util.InputUtil
+import net.minecraft.text.Text
 import net.minecraft.util.Identifier
 import org.lwjgl.glfw.GLFW
 import java.util.UUID
@@ -14,6 +15,30 @@ import java.util.UUID
  * Features draggable positioning, edge/corner resizing, and scrollable content.
  */
 object BattleInfoPanel {
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // UI Translation Helpers
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private object UI {
+        fun translate(key: String): String = Text.translatable("cobblemonextendedbattleui.ui.$key").string
+
+        val noEffects: String get() = translate("no_effects")
+        val noneActive: String get() = translate("none_active")
+        val field: String get() = translate("field")
+        val side: String get() = translate("side")
+        val pokemon: String get() = translate("pokemon")
+        val ally: String get() = translate("ally")
+        val enemy: String get() = translate("enemy")
+        val affected: String get() = translate("affected")
+        val effectSingular: String get() = translate("effect")
+        val effectPlural: String get() = translate("effects")
+        val pokemonSingular: String get() = translate("pokemon_count.singular")
+        val pokemonPlural: String get() = translate("pokemon_count.plural")
+
+        fun effectCount(count: Int): String = if (count == 1) effectSingular else effectPlural
+        fun pokemonCount(count: Int): String = if (count == 1) "$count $pokemonSingular" else "$count $pokemonPlural"
+    }
 
     // Opacity for minimized state (matches Cobblemon's BattleOverlay behavior)
     private const val MINIMISED_OPACITY = 0.5f
@@ -709,7 +734,7 @@ object BattleInfoPanel {
                            allyEffectCount > 0 || enemyEffectCount > 0
 
         if (!hasAnyEffects) {
-            drawText(context, "No effects", (x + PADDING).toFloat(), currentY.toFloat(), TEXT_DIM, 0.8f * textScale)
+            drawText(context, UI.noEffects, (x + PADDING).toFloat(), currentY.toFloat(), TEXT_DIM, 0.8f * textScale)
         } else {
             BattleStateTracker.weather?.let { w ->
                 val turns = BattleStateTracker.getWeatherTurnsRemaining() ?: "?"
@@ -733,27 +758,25 @@ object BattleInfoPanel {
             }
 
             if (playerConds.isNotEmpty()) {
-                drawText(context, "${playerSideNames.sideName}: ${playerConds.size} effect${if (playerConds.size > 1) "s" else ""}",
+                drawText(context, "${playerSideNames.sideName}: ${playerConds.size} ${UI.effectCount(playerConds.size)}",
                     (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_PLAYER, 0.8f * textScale)
                 currentY += (lineHeight * 0.9).toInt()
             }
 
             if (oppConds.isNotEmpty()) {
-                drawText(context, "${opponentSideNames.sideName}: ${oppConds.size} effect${if (oppConds.size > 1) "s" else ""}",
+                drawText(context, "${opponentSideNames.sideName}: ${oppConds.size} ${UI.effectCount(oppConds.size)}",
                     (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_OPPONENT, 0.8f * textScale)
                 currentY += (lineHeight * 0.9).toInt()
             }
 
             if (allyEffectCount > 0) {
-                val pokemonText = if (allyEffectCount == 1) "1 Pokémon" else "$allyEffectCount Pokémon"
-                drawText(context, "${playerSideNames.possessiveName}: $pokemonText affected",
+                drawText(context, "${playerSideNames.possessiveName}: ${UI.pokemonCount(allyEffectCount)} ${UI.affected}",
                     (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_PLAYER, 0.8f * textScale)
                 currentY += (lineHeight * 0.9).toInt()
             }
 
             if (enemyEffectCount > 0) {
-                val pokemonText = if (enemyEffectCount == 1) "1 Pokémon" else "$enemyEffectCount Pokémon"
-                drawText(context, "${opponentSideNames.possessiveName}: $pokemonText affected",
+                drawText(context, "${opponentSideNames.possessiveName}: ${UI.pokemonCount(enemyEffectCount)} ${UI.affected}",
                     (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_OPPONENT, 0.8f * textScale)
             }
         }
@@ -805,7 +828,7 @@ object BattleInfoPanel {
         var currentY = contentStartY - PanelConfig.scrollOffset
 
         // FIELD section
-        currentY = renderSection(context, x, currentY, contentWidth, "FIELD", ACCENT_FIELD) { sectionY ->
+        currentY = renderSection(context, x, currentY, contentWidth, UI.field, ACCENT_FIELD) { sectionY ->
             var sy = sectionY
             var hasContent = false
 
@@ -834,7 +857,7 @@ object BattleInfoPanel {
             }
 
             if (!hasContent) {
-                drawText(context, "None active", (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
+                drawText(context, UI.noneActive, (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
                 sy += lineHeight
             }
             sy
@@ -843,7 +866,7 @@ object BattleInfoPanel {
         currentY += SECTION_GAP
 
         // ALLY SIDE EFFECTS section (screens, hazards on your side)
-        currentY = renderSection(context, x, currentY, contentWidth, "${playerSideNames.sideName} SIDE", ACCENT_PLAYER) { sectionY ->
+        currentY = renderSection(context, x, currentY, contentWidth, "${playerSideNames.sideName} ${UI.side}", ACCENT_PLAYER) { sectionY ->
             var sy = sectionY
             val conditions = BattleStateTracker.getPlayerSideConditions()
 
@@ -860,7 +883,7 @@ object BattleInfoPanel {
                     sy += lineHeight
                 }
             } else {
-                drawText(context, "None active", (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
+                drawText(context, UI.noneActive, (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
                 sy += lineHeight
             }
             sy
@@ -869,7 +892,7 @@ object BattleInfoPanel {
         currentY += SECTION_GAP
 
         // ENEMY SIDE EFFECTS section (screens, hazards on enemy side)
-        currentY = renderSection(context, x, currentY, contentWidth, "${opponentSideNames.sideName} SIDE", ACCENT_OPPONENT) { sectionY ->
+        currentY = renderSection(context, x, currentY, contentWidth, "${opponentSideNames.sideName} ${UI.side}", ACCENT_OPPONENT) { sectionY ->
             var sy = sectionY
             val conditions = BattleStateTracker.getOpponentSideConditions()
 
@@ -886,7 +909,7 @@ object BattleInfoPanel {
                     sy += lineHeight
                 }
             } else {
-                drawText(context, "None active", (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
+                drawText(context, UI.noneActive, (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
                 sy += lineHeight
             }
             sy
@@ -895,14 +918,14 @@ object BattleInfoPanel {
         currentY += SECTION_GAP
 
         // YOUR POKÉMON section
-        currentY = renderSection(context, x, currentY, contentWidth, "${playerSideNames.possessiveName} POKÉMON", ACCENT_PLAYER) { sectionY ->
+        currentY = renderSection(context, x, currentY, contentWidth, "${playerSideNames.possessiveName} ${UI.pokemon}", ACCENT_PLAYER) { sectionY ->
             renderPokemonSection(context, x, sectionY, contentWidth, allyPokemonData)
         }
 
         currentY += SECTION_GAP
 
         // ENEMY POKÉMON section
-        renderSection(context, x, currentY, contentWidth, "${opponentSideNames.possessiveName} POKÉMON", ACCENT_OPPONENT) { sectionY ->
+        renderSection(context, x, currentY, contentWidth, "${opponentSideNames.possessiveName} ${UI.pokemon}", ACCENT_OPPONENT) { sectionY ->
             renderPokemonSection(context, x, sectionY, contentWidth, opponentPokemonData)
         }
 
@@ -925,7 +948,7 @@ object BattleInfoPanel {
         val hasAnyEffects = pokemonData.any { it.hasAnyEffects() }
 
         if (!hasAnyEffects) {
-            drawTextClipped(context, "No effects", (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
+            drawTextClipped(context, UI.noEffects, (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
             sy += lineHeight
             return sy
         }
@@ -1256,12 +1279,12 @@ object BattleInfoPanel {
     private fun getPlayerSideNames(side: ClientBattleSide, isSpectating: Boolean, isPlayerSide: Boolean): SideNames {
         val actors = side.actors
         if (actors.isEmpty()) {
-            return if (isPlayerSide) SideNames("ALLY", "ALLY") else SideNames("ENEMY", "ENEMY")
+            return if (isPlayerSide) SideNames(UI.ally, UI.ally) else SideNames(UI.enemy, UI.enemy)
         }
 
         // Get the first actor's display name
         val firstActorName = actors.firstOrNull()?.displayName?.string
-            ?: return if (isPlayerSide) SideNames("ALLY", "ALLY") else SideNames("ENEMY", "ENEMY")
+            ?: return if (isPlayerSide) SideNames(UI.ally, UI.ally) else SideNames(UI.enemy, UI.enemy)
 
         // Truncate long names to fit in section headers
         val truncatedName = if (firstActorName.length > 12) {

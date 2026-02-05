@@ -1,3 +1,53 @@
+# Translations
+
+## Creating Translation Resource Packs
+
+You can translate the mod's UI into any language using a resource pack.
+
+### Quick Start
+
+1. Create a resource pack folder structure:
+```
+MyTranslationPack/
+├── pack.mcmeta
+└── assets/
+    └── cobblemonextendedbattleui/
+        └── lang/
+            └── pt_br.json    (your language code)
+```
+
+2. Create `pack.mcmeta`:
+```json
+{
+  "pack": {
+    "pack_format": 34,
+    "description": "Cobblemon Extended Battle UI - Portuguese Translation"
+  }
+}
+```
+
+3. Copy the English template below and translate the values (not the keys).
+
+4. Place the folder in your `.minecraft/resourcepacks/` directory.
+
+5. Enable the resource pack in Minecraft.
+
+### Language Codes
+
+Use Minecraft's language codes for the filename:
+- `pt_br.json` - Portuguese (Brazil)
+- `es_es.json` - Spanish (Spain)
+- `fr_fr.json` - French
+- `de_de.json` - German
+- `it_it.json` - Italian
+- `ja_jp.json` - Japanese
+- etc...
+
+### Translation Template
+
+Copy this file and translate the values on the right side of each colon:
+
+```json
 {
   "category.cobblemonextendedbattleui": "Cobblemon Extended Battle UI",
   "key.cobblemonextendedbattleui.toggle_panel": "Toggle Battle Info Panel",
@@ -10,27 +60,20 @@
 
   "cobblemonextendedbattleui.config.enableTeamIndicators": "Team Indicators",
   "cobblemonextendedbattleui.config.enableTeamIndicators.tooltip": "Show Pokemon team indicators under health bars during battle",
-
   "cobblemonextendedbattleui.config.teamIndicatorRepositioning": "Team Indicator Repositioning",
-  "cobblemonextendedbattleui.config.teamIndicatorRepositioning.tooltip": "Allow dragging team indicators to reposition them. When disabled, indicators stay in their default positions.",
-
+  "cobblemonextendedbattleui.config.teamIndicatorRepositioning.tooltip": "Allow dragging team indicators to reposition them",
   "cobblemonextendedbattleui.config.enableBattleInfoPanel": "Battle Info Panel",
   "cobblemonextendedbattleui.config.enableBattleInfoPanel.tooltip": "Show panel with weather, terrain, field conditions, and stat stages",
-
   "cobblemonextendedbattleui.config.enableBattleLog": "Battle Log",
   "cobblemonextendedbattleui.config.enableBattleLog.tooltip": "Show custom battle log widget with damage percentages",
-
   "cobblemonextendedbattleui.config.enableMoveTooltips": "Move Tooltips",
-  "cobblemonextendedbattleui.config.enableMoveTooltips.tooltip": "Show tooltips with type effectiveness when hovering over moves. Disable if using Cobblemon Move Inspector.",
-
+  "cobblemonextendedbattleui.config.enableMoveTooltips.tooltip": "Show tooltips with type effectiveness when hovering over moves",
   "cobblemonextendedbattleui.config.showTeraType": "Show Tera Type",
   "cobblemonextendedbattleui.config.showTeraType.tooltip": "Display Tera Type in Pokemon tooltips when known",
-
   "cobblemonextendedbattleui.config.showStatRanges": "Show Stat Values",
-  "cobblemonextendedbattleui.config.showStatRanges.tooltip": "Display Attack, Defense, Sp. Atk, and Sp. Def in Pokemon tooltips (Speed is always shown)",
-
+  "cobblemonextendedbattleui.config.showStatRanges.tooltip": "Display Attack, Defense, Sp. Atk, and Sp. Def in Pokemon tooltips",
   "cobblemonextendedbattleui.config.showBaseCritRate": "Show Base Crit Rate",
-  "cobblemonextendedbattleui.config.showBaseCritRate.tooltip": "Always show crit rate in move tooltips. When disabled, only shows crit rate for high-crit moves or when boosted by items/abilities.",
+  "cobblemonextendedbattleui.config.showBaseCritRate.tooltip": "Always show crit rate in move tooltips",
 
   "cobblemonextendedbattleui.stat.attack": "Attack",
   "cobblemonextendedbattleui.stat.attack.abbr": "Atk",
@@ -111,3 +154,11 @@
   "cobblemonextendedbattleui.ui.pokemon_count.singular": "Pokémon",
   "cobblemonextendedbattleui.ui.pokemon_count.plural": "Pokémon"
 }
+```
+
+### Tips
+
+- You only need to include keys you want to change - missing keys fall back to English
+- Keep abbreviations short (3-4 characters) so they fit in the UI
+- Test your translation in-game to make sure text fits properly
+- Share your translation with the community!

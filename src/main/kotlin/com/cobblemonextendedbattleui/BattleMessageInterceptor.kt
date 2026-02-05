@@ -29,7 +29,21 @@ object BattleMessageInterceptor {
     )
 
     // Maps Cobblemon stat translation KEYS to BattleStat enum (language-independent)
+    // Cobblemon uses ".name" suffix and British spelling (defence, not defense)
     private val STAT_KEY_MAPPING = mapOf(
+        // Primary keys - exact Cobblemon keys with .name suffix and British spelling
+        "cobblemon.stat.attack.name" to BattleStateTracker.BattleStat.ATTACK,
+        "cobblemon.stat.defence.name" to BattleStateTracker.BattleStat.DEFENSE,  // British spelling
+        "cobblemon.stat.special_attack.name" to BattleStateTracker.BattleStat.SPECIAL_ATTACK,
+        "cobblemon.stat.special_defence.name" to BattleStateTracker.BattleStat.SPECIAL_DEFENSE,  // British spelling
+        "cobblemon.stat.speed.name" to BattleStateTracker.BattleStat.SPEED,
+        "cobblemon.stat.accuracy.name" to BattleStateTracker.BattleStat.ACCURACY,
+        "cobblemon.stat.evasion.name" to BattleStateTracker.BattleStat.EVASION,
+        // Alternative spellings with .name suffix
+        "cobblemon.stat.defense.name" to BattleStateTracker.BattleStat.DEFENSE,  // American spelling fallback
+        "cobblemon.stat.special_defense.name" to BattleStateTracker.BattleStat.SPECIAL_DEFENSE,  // American spelling fallback
+        "cobblemon.stat.evasiveness.name" to BattleStateTracker.BattleStat.EVASION,
+        // Without .name suffix (fallback variants)
         "cobblemon.stat.attack" to BattleStateTracker.BattleStat.ATTACK,
         "cobblemon.stat.atk" to BattleStateTracker.BattleStat.ATTACK,
         "cobblemon.stat.defense" to BattleStateTracker.BattleStat.DEFENSE,
@@ -73,6 +87,7 @@ object BattleMessageInterceptor {
     private var lastMoveUser: String? = null
     private var lastMoveTarget: String? = null
     private var lastMoveName: String? = null
+    private var lastMoveKey: String? = null  // Translation key for language-independent matching
 
     /**
      * Clear stale move tracking data. Called when battle state is cleared.
@@ -81,11 +96,35 @@ object BattleMessageInterceptor {
         lastMoveUser = null
         lastMoveTarget = null
         lastMoveName = null
+        lastMoveKey = null
     }
 
-    // Move names that require special handling (case-insensitive matching)
-    private const val BATON_PASS = "baton pass"
-    private const val SPECTRAL_THIEF = "spectral thief"
+    // Move translation keys for special handling (language-independent)
+    // Cobblemon uses keys like "cobblemon.move.batonpass", "cobblemon.move.spectralthief"
+    private val BATON_PASS_KEYS = setOf(
+        "cobblemon.move.batonpass",
+        "cobblemon.move.baton_pass"
+    )
+    private val SPECTRAL_THIEF_KEYS = setOf(
+        "cobblemon.move.spectralthief",
+        "cobblemon.move.spectral_thief"
+    )
+
+    // Fallback: Move names for English compatibility (case-insensitive)
+    private const val BATON_PASS_NAME = "baton pass"
+    private const val SPECTRAL_THIEF_NAME = "spectral thief"
+
+    /**
+     * Check if the last move matches a special move by translation key or English name fallback.
+     */
+    private fun isMove(moveKeys: Set<String>, englishName: String): Boolean {
+        // First try translation key (language-independent)
+        if (lastMoveKey != null && moveKeys.any { lastMoveKey!!.equals(it, ignoreCase = true) }) {
+            return true
+        }
+        // Fall back to English name matching
+        return lastMoveName?.lowercase() == englishName
+    }
 
     // Ability announcement keys (for abilities that affect PP/mechanics)
     // Pressure: "X is exerting its Pressure!" - args: [pokemonName]
@@ -499,7 +538,6 @@ object BattleMessageInterceptor {
                         else -> it.toString()
                     }
                 }}")
-
             }
 
             if (key == TURN_KEY) {
@@ -512,14 +550,15 @@ object BattleMessageInterceptor {
             if (key == "cobblemon.battle.used_move_on" && args.size >= 3) {
                 lastMoveUser = argToString(args[0])
                 lastMoveName = argToString(args[1])
+                lastMoveKey = argToTranslationKey(args[1])  // Extract translation key for language-independent matching
                 lastMoveTarget = argToString(args[2])
-                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Move tracked - $lastMoveUser used $lastMoveName on $lastMoveTarget")
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Move tracked - $lastMoveUser used $lastMoveName (key=$lastMoveKey) on $lastMoveTarget")
 
                 // Track revealed move for tooltip display (pass target for Pressure PP check)
                 BattleStateTracker.addRevealedMove(lastMoveUser!!, lastMoveName!!, lastMoveTarget)
 
                 // Handle Spectral Thief: steal positive stat boosts from target
-                if (lastMoveName?.lowercase() == SPECTRAL_THIEF) {
+                if (isMove(SPECTRAL_THIEF_KEYS, SPECTRAL_THIEF_NAME)) {
                     BattleStateTracker.stealPositiveStats(lastMoveUser!!, lastMoveTarget!!)
                 }
                 // Don't return - let it continue to be processed by BattleLog
@@ -531,14 +570,15 @@ object BattleMessageInterceptor {
             if (key == "cobblemon.battle.used_move" && args.size >= 2) {
                 lastMoveUser = argToString(args[0])
                 lastMoveName = argToString(args[1])
+                lastMoveKey = argToTranslationKey(args[1])  // Extract translation key for language-independent matching
                 lastMoveTarget = null
-                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Self-move tracked - $lastMoveUser used $lastMoveName")
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Self-move tracked - $lastMoveUser used $lastMoveName (key=$lastMoveKey)")
 
                 // Track revealed move for tooltip display (no target = no Pressure check)
                 BattleStateTracker.addRevealedMove(lastMoveUser!!, lastMoveName!!, null)
 
                 // Handle Baton Pass: mark the user so stats transfer on switch
-                if (lastMoveName?.lowercase() == BATON_PASS) {
+                if (isMove(BATON_PASS_KEYS, BATON_PASS_NAME)) {
                     BattleStateTracker.markBatonPassUsed(lastMoveUser!!)
                 }
                 // Don't return - let it continue to be processed by BattleLog
@@ -1107,6 +1147,45 @@ object BattleMessageInterceptor {
     }
 
     /**
+     * Extract the actual Pokemon name from a message argument.
+     * Handles nested TranslatableTextContent like "cobblemon.battle.owned_pokemon" which
+     * wraps the Pokemon name inside: "%1$s's %2$s" where args[0]=owner, args[1]=pokemon.
+     *
+     * This is needed because in some languages (like Portuguese), self-boosts show
+     * "Torkoal de Player411" instead of just "Torkoal", but we need just "Torkoal"
+     * to match against BattleStateTracker.
+     */
+    private fun extractPokemonName(arg: Any): String {
+        when (arg) {
+            is Text -> {
+                val content = arg.content
+                if (content is TranslatableTextContent) {
+                    // Check for ownership wrapper: "cobblemon.battle.owned_pokemon"
+                    // Format: "%1$s's %2$s" where args[0]=owner, args[1]=pokemon
+                    if (content.key == "cobblemon.battle.owned_pokemon" && content.args.size >= 2) {
+                        // Extract the Pokemon name from args[1]
+                        return argToString(content.args[1])
+                    }
+                    // For species name keys like "cobblemon.species.pidgeotto.name", use the string directly
+                    if (content.key.startsWith("cobblemon.species.") && content.key.endsWith(".name")) {
+                        return arg.string
+                    }
+                }
+                // Fallback: use the full string
+                return arg.string
+            }
+            is TranslatableTextContent -> {
+                if (arg.key == "cobblemon.battle.owned_pokemon" && arg.args.size >= 2) {
+                    return argToString(arg.args[1])
+                }
+                return Text.translatable(arg.key, *arg.args).string
+            }
+            is String -> return arg
+            else -> return arg.toString()
+        }
+    }
+
+    /**
      * Extract the translation key from an argument if it's a TranslatableTextContent.
      * Returns null if it's not translatable (plain string, etc.)
      */
@@ -1125,30 +1204,74 @@ object BattleMessageInterceptor {
         }
     }
 
+    // Cobblemon stat translation keys for reverse lookup (translate key -> compare with received string)
+    // HP is not a battle stat that can be boosted/dropped, so it's excluded
+    // Cobblemon uses ".name" suffix and British spelling (defence, not defense)
+    private val COBBLEMON_STAT_KEYS = listOf(
+        "cobblemon.stat.attack.name" to BattleStateTracker.BattleStat.ATTACK,
+        "cobblemon.stat.defence.name" to BattleStateTracker.BattleStat.DEFENSE,  // British spelling
+        "cobblemon.stat.special_attack.name" to BattleStateTracker.BattleStat.SPECIAL_ATTACK,
+        "cobblemon.stat.special_defence.name" to BattleStateTracker.BattleStat.SPECIAL_DEFENSE,  // British spelling
+        "cobblemon.stat.speed.name" to BattleStateTracker.BattleStat.SPEED,
+        "cobblemon.stat.accuracy.name" to BattleStateTracker.BattleStat.ACCURACY,
+        "cobblemon.stat.evasion.name" to BattleStateTracker.BattleStat.EVASION
+    )
+
+    /**
+     * Reverse lookup: Find stat by comparing received string against Cobblemon's translated stat names.
+     * This handles cases where the stat argument is a plain translated string (not TranslatableTextContent).
+     */
+    private fun getStatFromTranslatedName(translatedName: String): BattleStateTracker.BattleStat? {
+        val lowerName = translatedName.lowercase()
+        for ((key, stat) in COBBLEMON_STAT_KEYS) {
+            try {
+                val translated = Text.translatable(key).string.lowercase()
+                if (translated == lowerName) {
+                    return stat
+                }
+            } catch (e: Exception) {
+                // Key might not exist, skip
+            }
+        }
+        return null
+    }
+
     // Args: [pokemonName, statName]. stages > 0 for boost, < 0 for drop.
     private fun extractBoost(args: Array<out Any>, stages: Int) {
         if (args.size < 2) {
-            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Boost args too short: ${args.size}, args=${args.map { "${it::class.simpleName}:$it" }}")
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Boost args too short: ${args.size}")
             return
         }
 
-        val pokemonName = argToString(args[0])
+        // Extract Pokemon name, handling ownership wrappers like "cobblemon.battle.owned_pokemon"
+        val pokemonName = extractPokemonName(args[0])
+        val statName = argToString(args[1])
 
-        // First try to get stat from translation key (language-independent)
+        // Strategy 1: Try to get stat from translation key (if arg is TranslatableTextContent)
         val statKey = argToTranslationKey(args[1])
         var stat = statKey?.let { STAT_KEY_MAPPING[it] }
 
-        // If no translation key or key not found, fall back to string matching (English only)
+        // Strategy 2: Reverse lookup - translate Cobblemon's stat keys and compare (works for any language)
         if (stat == null) {
-            val statName = argToString(args[1])
-            stat = STAT_NAME_MAPPING[statName.lowercase()]
-            if (stat == null) {
-                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Unknown stat - key='$statKey', name='$statName'")
-                return
+            stat = getStatFromTranslatedName(statName)
+            if (stat != null) {
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Boost parsing (reverse lookup) - pokemon='$pokemonName', stat='$statName', stages=$stages")
             }
-            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Boost parsing (string fallback) - pokemon='$pokemonName', stat='$statName', stages=$stages")
         } else {
             CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Boost parsing (key match) - pokemon='$pokemonName', key='$statKey', stages=$stages")
+        }
+
+        // Strategy 3: Fall back to English string matching
+        if (stat == null) {
+            stat = STAT_NAME_MAPPING[statName.lowercase()]
+            if (stat != null) {
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Boost parsing (English fallback) - pokemon='$pokemonName', stat='$statName', stages=$stages")
+            }
+        }
+
+        if (stat == null) {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: Unknown stat - key='$statKey', name='$statName'")
+            return
         }
 
         CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: $pokemonName ${stat.abbr} ${if (stages > 0) "+" else ""}$stages")

@@ -2,6 +2,7 @@ package com.cobblemonextendedbattleui
 
 import com.cobblemon.mod.common.api.pokemon.PokemonSpecies
 import com.cobblemon.mod.common.pokemon.FormData
+import net.minecraft.text.Text
 import net.minecraft.util.Identifier
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -16,14 +17,17 @@ object BattleStateTracker {
     // Stat Change Tracking
     // ═══════════════════════════════════════════════════════════════════════════
 
-    enum class BattleStat(val displayName: String, val abbr: String) {
-        ATTACK("Attack", "Atk"),
-        DEFENSE("Defense", "Def"),
-        SPECIAL_ATTACK("Sp. Atk", "SpA"),
-        SPECIAL_DEFENSE("Sp. Def", "SpD"),
-        SPEED("Speed", "Spe"),
-        ACCURACY("Accuracy", "Acc"),
-        EVASION("Evasion", "Eva")
+    enum class BattleStat(val translationKey: String, val abbrKey: String) {
+        ATTACK("cobblemonextendedbattleui.stat.attack", "cobblemonextendedbattleui.stat.attack.abbr"),
+        DEFENSE("cobblemonextendedbattleui.stat.defense", "cobblemonextendedbattleui.stat.defense.abbr"),
+        SPECIAL_ATTACK("cobblemonextendedbattleui.stat.special_attack", "cobblemonextendedbattleui.stat.special_attack.abbr"),
+        SPECIAL_DEFENSE("cobblemonextendedbattleui.stat.special_defense", "cobblemonextendedbattleui.stat.special_defense.abbr"),
+        SPEED("cobblemonextendedbattleui.stat.speed", "cobblemonextendedbattleui.stat.speed.abbr"),
+        ACCURACY("cobblemonextendedbattleui.stat.accuracy", "cobblemonextendedbattleui.stat.accuracy.abbr"),
+        EVASION("cobblemonextendedbattleui.stat.evasion", "cobblemonextendedbattleui.stat.evasion.abbr");
+
+        val displayName: String get() = Text.translatable(translationKey).string
+        val abbr: String get() = Text.translatable(abbrKey).string
     }
 
     // Maps UUID -> Map<BattleStat, Int> for stat stages (-6 to +6)
@@ -513,12 +517,14 @@ object BattleStateTracker {
         }
     }
 
-    enum class Weather(val displayName: String, val icon: String) {
-        RAIN("Rain", "🌧"),
-        SUN("Harsh Sunlight", "☀"),
-        SANDSTORM("Sandstorm", "🏜"),
-        HAIL("Hail", "🌨"),
-        SNOW("Snow", "❄")
+    enum class Weather(val translationKey: String, val icon: String) {
+        RAIN("cobblemonextendedbattleui.weather.rain", "🌧"),
+        SUN("cobblemonextendedbattleui.weather.sun", "☀"),
+        SANDSTORM("cobblemonextendedbattleui.weather.sandstorm", "🏜"),
+        HAIL("cobblemonextendedbattleui.weather.hail", "🌨"),
+        SNOW("cobblemonextendedbattleui.weather.snow", "❄");
+
+        val displayName: String get() = Text.translatable(translationKey).string
     }
 
     data class WeatherState(
@@ -530,11 +536,13 @@ object BattleStateTracker {
     var weather: WeatherState? = null
         private set
 
-    enum class Terrain(val displayName: String, val icon: String) {
-        ELECTRIC("Electric Terrain", "⚡"),
-        GRASSY("Grassy Terrain", "🌿"),
-        MISTY("Misty Terrain", "🌫"),
-        PSYCHIC("Psychic Terrain", "🔮")
+    enum class Terrain(val translationKey: String, val icon: String) {
+        ELECTRIC("cobblemonextendedbattleui.terrain.electric", "⚡"),
+        GRASSY("cobblemonextendedbattleui.terrain.grassy", "🌿"),
+        MISTY("cobblemonextendedbattleui.terrain.misty", "🌫"),
+        PSYCHIC("cobblemonextendedbattleui.terrain.psychic", "🔮");
+
+        val displayName: String get() = Text.translatable(translationKey).string
     }
 
     data class TerrainState(
@@ -546,11 +554,13 @@ object BattleStateTracker {
     var terrain: TerrainState? = null
         private set
 
-    enum class FieldCondition(val displayName: String, val icon: String, val baseDuration: Int) {
-        TRICK_ROOM("Trick Room", "🔄", 5),
-        GRAVITY("Gravity", "⬇", 5),
-        MAGIC_ROOM("Magic Room", "✨", 5),
-        WONDER_ROOM("Wonder Room", "🔀", 5)
+    enum class FieldCondition(val translationKey: String, val icon: String, val baseDuration: Int) {
+        TRICK_ROOM("cobblemonextendedbattleui.field.trick_room", "🔄", 5),
+        GRAVITY("cobblemonextendedbattleui.field.gravity", "⬇", 5),
+        MAGIC_ROOM("cobblemonextendedbattleui.field.magic_room", "✨", 5),
+        WONDER_ROOM("cobblemonextendedbattleui.field.wonder_room", "🔀", 5);
+
+        val displayName: String get() = Text.translatable(translationKey).string
     }
 
     data class FieldConditionState(
@@ -560,18 +570,20 @@ object BattleStateTracker {
 
     private val fieldConditions = ConcurrentHashMap<FieldCondition, FieldConditionState>()
 
-    enum class SideCondition(val displayName: String, val icon: String, val baseDuration: Int?, val maxStacks: Int = 1) {
-        REFLECT("Reflect", "🛡", 5),
-        LIGHT_SCREEN("Light Screen", "💡", 5),
-        AURORA_VEIL("Aurora Veil", "🌈", 5),
-        TAILWIND("Tailwind", "💨", 4),
-        SAFEGUARD("Safeguard", "🔰", 5),
-        LUCKY_CHANT("Lucky Chant", "🍀", 5),
-        MIST("Mist", "🌁", 5),
-        STEALTH_ROCK("Stealth Rock", "🪨", null),
-        SPIKES("Spikes", "📌", null, 3),
-        TOXIC_SPIKES("Toxic Spikes", "☠", null, 2),
-        STICKY_WEB("Sticky Web", "🕸", null)
+    enum class SideCondition(val translationKey: String, val icon: String, val baseDuration: Int?, val maxStacks: Int = 1) {
+        REFLECT("cobblemonextendedbattleui.side.reflect", "🛡", 5),
+        LIGHT_SCREEN("cobblemonextendedbattleui.side.light_screen", "💡", 5),
+        AURORA_VEIL("cobblemonextendedbattleui.side.aurora_veil", "🌈", 5),
+        TAILWIND("cobblemonextendedbattleui.side.tailwind", "💨", 4),
+        SAFEGUARD("cobblemonextendedbattleui.side.safeguard", "🔰", 5),
+        LUCKY_CHANT("cobblemonextendedbattleui.side.lucky_chant", "🍀", 5),
+        MIST("cobblemonextendedbattleui.side.mist", "🌁", 5),
+        STEALTH_ROCK("cobblemonextendedbattleui.side.stealth_rock", "🪨", null),
+        SPIKES("cobblemonextendedbattleui.side.spikes", "📌", null, 3),
+        TOXIC_SPIKES("cobblemonextendedbattleui.side.toxic_spikes", "☠", null, 2),
+        STICKY_WEB("cobblemonextendedbattleui.side.sticky_web", "🕸", null);
+
+        val displayName: String get() = Text.translatable(translationKey).string
     }
 
     /**
@@ -579,49 +591,51 @@ object BattleStateTracker {
      * baseDuration = turns until expiry (null = indefinite), countsDown = display as countdown.
      */
     enum class VolatileStatus(
-        val displayName: String,
+        val translationKey: String,
         val icon: String,
         val isNegative: Boolean = true,
         val baseDuration: Int? = null,
         val countsDown: Boolean = false
     ) {
         // Seeding/Draining effects
-        LEECH_SEED("Leech Seed", "🌱"),
+        LEECH_SEED("cobblemonextendedbattleui.volatile.leech_seed", "🌱"),
 
         // Mental/Behavioral effects
-        CONFUSION("Confusion", "💫", baseDuration = 4),  // 2-5 turns, use 4 as average
-        TAUNT("Taunt", "😤", baseDuration = 3),
-        ENCORE("Encore", "🔁", baseDuration = 3),
-        DISABLE("Disable", "🚫", baseDuration = 4),
-        TORMENT("Torment", "😈"),
-        INFATUATION("Infatuation", "💕"),
+        CONFUSION("cobblemonextendedbattleui.volatile.confusion", "💫", baseDuration = 4),
+        TAUNT("cobblemonextendedbattleui.volatile.taunt", "😤", baseDuration = 3),
+        ENCORE("cobblemonextendedbattleui.volatile.encore", "🔁", baseDuration = 3),
+        DISABLE("cobblemonextendedbattleui.volatile.disable", "🚫", baseDuration = 4),
+        TORMENT("cobblemonextendedbattleui.volatile.torment", "😈"),
+        INFATUATION("cobblemonextendedbattleui.volatile.infatuation", "💕"),
 
         // Countdown effects
-        PERISH_SONG("Perish Song", "💀", baseDuration = 4, countsDown = true),  // 3, 2, 1, faint
-        DROWSY("Drowsy", "😴", baseDuration = 1),  // Yawn - will sleep next turn
+        PERISH_SONG("cobblemonextendedbattleui.volatile.perish_song", "💀", baseDuration = 4, countsDown = true),
+        DROWSY("cobblemonextendedbattleui.volatile.drowsy", "😴", baseDuration = 1),
 
         // Damage over time
-        CURSE("Curse", "👻"),  // Ghost-type curse - indefinite
-        NIGHTMARE("Nightmare", "😱"),
-        BOUND("Bound", "⛓", baseDuration = 5),  // Wrap, Bind, Fire Spin, etc. - 4-5 turns
+        CURSE("cobblemonextendedbattleui.volatile.curse", "👻"),
+        NIGHTMARE("cobblemonextendedbattleui.volatile.nightmare", "😱"),
+        BOUND("cobblemonextendedbattleui.volatile.bound", "⛓", baseDuration = 5),
 
         // Movement restriction
-        TRAPPED("Trapped", "🚷"),  // Mean Look, Block, Spider Web - indefinite
+        TRAPPED("cobblemonextendedbattleui.volatile.trapped", "🚷"),
 
         // Protection/Healing (positive for the affected Pokemon)
-        SUBSTITUTE("Substitute", "🎭", isNegative = false),
-        AQUA_RING("Aqua Ring", "💧", isNegative = false),
-        INGRAIN("Ingrain", "🌳", isNegative = false),
-        FOCUS_ENERGY("Focus Energy", "🎯", isNegative = false),
-        MAGNET_RISE("Magnet Rise", "🧲", isNegative = false, baseDuration = 5),
+        SUBSTITUTE("cobblemonextendedbattleui.volatile.substitute", "🎭", isNegative = false),
+        AQUA_RING("cobblemonextendedbattleui.volatile.aqua_ring", "💧", isNegative = false),
+        INGRAIN("cobblemonextendedbattleui.volatile.ingrain", "🌳", isNegative = false),
+        FOCUS_ENERGY("cobblemonextendedbattleui.volatile.focus_energy", "🎯", isNegative = false),
+        MAGNET_RISE("cobblemonextendedbattleui.volatile.magnet_rise", "🧲", isNegative = false, baseDuration = 5),
 
         // Prevention effects
-        EMBARGO("Embargo", "📦", baseDuration = 5),
-        HEAL_BLOCK("Heal Block", "💔", baseDuration = 5),
+        EMBARGO("cobblemonextendedbattleui.volatile.embargo", "📦", baseDuration = 5),
+        HEAL_BLOCK("cobblemonextendedbattleui.volatile.heal_block", "💔", baseDuration = 5),
 
         // Other
-        DESTINY_BOND("Destiny Bond", "🔗", isNegative = false),
-        FLINCH("Flinch", "💥")
+        DESTINY_BOND("cobblemonextendedbattleui.volatile.destiny_bond", "🔗", isNegative = false),
+        FLINCH("cobblemonextendedbattleui.volatile.flinch", "💥");
+
+        val displayName: String get() = Text.translatable(translationKey).string
     }
 
     data class VolatileStatusState(

@@ -1,5 +1,7 @@
 package com.cobblemonextendedbattleui.mixin;
 
+import com.cobblemon.mod.common.client.battle.SingleActionRequest;
+import com.cobblemon.mod.common.client.gui.battle.subscreen.BattleActionSelection;
 import com.cobblemon.mod.common.client.gui.battle.subscreen.BattleMoveSelection;
 import com.cobblemon.mod.common.client.gui.battle.subscreen.BattleMoveSelection.MoveTile;
 import com.cobblemonextendedbattleui.MoveTooltipRenderer;
@@ -12,6 +14,7 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Mixin to add move tooltips to Cobblemon's move selection screen.
@@ -43,6 +46,15 @@ public class BattleMoveSelectionMixin {
         if (!PanelConfig.INSTANCE.getEnableMoveTooltips()) {
             return;
         }
+
+        // Identify which Pokemon is selecting a move (critical for doubles)
+        SingleActionRequest request = ((BattleActionSelection) (Object) this).getRequest();
+        UUID pokemonUuid = null;
+        if (request != null && request.getActivePokemon() != null
+                && request.getActivePokemon().getBattlePokemon() != null) {
+            pokemonUuid = request.getActivePokemon().getBattlePokemon().getUuid();
+        }
+        MoveTooltipRenderer.INSTANCE.setActivePokemonUuid(pokemonUuid);
 
         // Register each move tile's bounds for hover detection
         for (MoveTile tile : moveTiles) {

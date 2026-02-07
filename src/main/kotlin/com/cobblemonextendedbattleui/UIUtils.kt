@@ -7,6 +7,7 @@ import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.util.InputUtil
 import net.minecraft.text.Text
+import net.minecraft.util.Identifier
 import org.lwjgl.glfw.GLFW
 
 /**
@@ -61,6 +62,16 @@ object UIUtils {
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Constants
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /** Opacity multiplier when the battle overlay is minimised. */
+    const val MINIMISED_OPACITY = 0.5f
+
+    /** Z-offset for popup rendering (above battle overlay). */
+    const val POPUP_Z_OFFSET = 400.0
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Color utilities
     // ═══════════════════════════════════════════════════════════════════════════
 
@@ -68,6 +79,20 @@ object UIUtils {
      * Creates an ARGB color from component values.
      */
     fun color(r: Int, g: Int, b: Int, a: Int = 255): Int = (a shl 24) or (r shl 16) or (g shl 8) or b
+
+    /**
+     * Applies minimised-state opacity to a color's alpha channel.
+     * When minimised, reduces alpha by [MINIMISED_OPACITY]. Otherwise returns the color unchanged.
+     */
+    fun applyMinimisedOpacity(color: Int, isMinimised: Boolean): Int {
+        if (!isMinimised) return color
+        val a = ((color shr 24) and 0xFF)
+        val r = (color shr 16) and 0xFF
+        val g = (color shr 8) and 0xFF
+        val b = color and 0xFF
+        val newA = (a * MINIMISED_OPACITY).toInt()
+        return (newA shl 24) or (r shl 16) or (g shl 8) or b
+    }
 
     /**
      * Gets a display color for an ElementalType, brightened for visibility on dark backgrounds.
@@ -100,7 +125,7 @@ object UIUtils {
     /**
      * Tracks current scissor bounds for manual clipping checks.
      */
-    data class ScissorBounds(var minY: Int = 0, var maxY: Int = 0)
+    data class ScissorBounds(val minY: Int = 0, val maxY: Int = 0)
 
     /**
      * Enables scissor test with the given bounds.
@@ -344,6 +369,96 @@ object UIUtils {
 
         return ResizeResult(newX, newY, newWidth, newHeight)
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Popup frame and cell rendering
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    val POPUP_FRAME_TEXTURE: Identifier = Identifier.of(
+        "cobblemonextendedbattleui", "textures/gui/popup_frame.png"
+    )
+    const val POPUP_TEX_W = 24
+    const val POPUP_TEX_H = 24
+    const val POPUP_SLICE = 6
+
+    // Layout constants shared across popup-style UIs
+    const val FRAME_INSET = 4
+    const val CELL_GAP = 3
+    const val CELL_PAD = 3
+    const val CELL_VPAD_TOP = 5
+    const val CELL_VPAD_BOTTOM = 2
+    const val COL_GAP = 3
+    const val DIVIDER_H = 5
+
+    // Cell colors (Cobblemon dark blue-tinted palette)
+    val CELL_BG = color(22, 27, 34)
+    val CELL_BORDER = color(50, 58, 72)
+    val ROW_DIVIDER_COLOR = color(38, 45, 58)
+
+    /**
+     * Renders a 9-slice frame using the shared popup_frame.png texture.
+     */
+    fun renderPopupFrame(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
+        val tex = POPUP_FRAME_TEXTURE
+        val s = POPUP_SLICE
+        val centerTexW = POPUP_TEX_W - s * 2
+        val centerTexH = POPUP_TEX_H - s * 2
+        val centerW = width - s * 2
+        val centerH = height - s * 2
+
+        // Corners
+        context.drawTexture(tex, x, y, s, s, 0f, 0f, s, s, POPUP_TEX_W, POPUP_TEX_H)
+        context.drawTexture(tex, x + width - s, y, s, s,
+            (POPUP_TEX_W - s).toFloat(), 0f, s, s, POPUP_TEX_W, POPUP_TEX_H)
+        context.drawTexture(tex, x, y + height - s, s, s,
+            0f, (POPUP_TEX_H - s).toFloat(), s, s, POPUP_TEX_W, POPUP_TEX_H)
+        context.drawTexture(tex, x + width - s, y + height - s, s, s,
+            (POPUP_TEX_W - s).toFloat(), (POPUP_TEX_H - s).toFloat(), s, s, POPUP_TEX_W, POPUP_TEX_H)
+
+        // Edges
+        if (centerW > 0) {
+            context.drawTexture(tex, x + s, y, centerW, s,
+                s.toFloat(), 0f, centerTexW, s, POPUP_TEX_W, POPUP_TEX_H)
+            context.drawTexture(tex, x + s, y + height - s, centerW, s,
+                s.toFloat(), (POPUP_TEX_H - s).toFloat(), centerTexW, s, POPUP_TEX_W, POPUP_TEX_H)
+        }
+        if (centerH > 0) {
+            context.drawTexture(tex, x, y + s, s, centerH,
+                0f, s.toFloat(), s, centerTexH, POPUP_TEX_W, POPUP_TEX_H)
+            context.drawTexture(tex, x + width - s, y + s, s, centerH,
+                (POPUP_TEX_W - s).toFloat(), s.toFloat(), s, centerTexH, POPUP_TEX_W, POPUP_TEX_H)
+        }
+
+        // Center
+        if (centerW > 0 && centerH > 0) {
+            context.drawTexture(tex, x + s, y + s, centerW, centerH,
+                s.toFloat(), s.toFloat(), centerTexW, centerTexH, POPUP_TEX_W, POPUP_TEX_H)
+        }
+    }
+
+    /**
+     * Draws a cell background with 1px border and filled interior.
+     * @param colorTransform Optional transform applied to colors (e.g., for opacity)
+     */
+    fun drawPopupCell(
+        context: DrawContext, x: Int, y: Int, w: Int, h: Int,
+        colorTransform: (Int) -> Int = { it }
+    ) {
+        context.fill(x, y, x + w, y + h, colorTransform(CELL_BORDER))
+        context.fill(x + 1, y + 1, x + w - 1, y + h - 1, colorTransform(CELL_BG))
+    }
+
+    /**
+     * Draws a thin horizontal divider within a cell.
+     * @param colorTransform Optional transform applied to color (e.g., for opacity)
+     */
+    fun drawPopupRowDivider(
+        context: DrawContext, cellX: Int, cellW: Int, y: Int,
+        colorTransform: (Int) -> Int = { it }
+    ) {
+        context.fill(cellX + 1, y, cellX + cellW - 1, y + 1, colorTransform(ROW_DIVIDER_COLOR))
+    }
+
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Corner handle rendering

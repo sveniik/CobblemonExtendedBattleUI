@@ -2,6 +2,7 @@ package com.cobblemonextendedbattleui
 
 import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.battle.ClientBattleSide
+import com.mojang.blaze3d.systems.RenderSystem
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.util.InputUtil
@@ -11,7 +12,9 @@ import org.lwjgl.glfw.GLFW
 import java.util.UUID
 
 /**
- * Pokemon Scarlet/Violet inspired battle information panel.
+ * Battle information panel with 9-slice textured frame and single-fill-cell layout.
+ * Header cell (fixed) + one content cell that fills all remaining space.
+ * Content groups separated by dividers within the cell.
  * Features draggable positioning, edge/corner resizing, and scrollable content.
  */
 object BattleInfoPanel {
@@ -24,10 +27,6 @@ object BattleInfoPanel {
         fun translate(key: String): String = Text.translatable("cobblemonextendedbattleui.ui.$key").string
 
         val noEffects: String get() = translate("no_effects")
-        val noneActive: String get() = translate("none_active")
-        val field: String get() = translate("field")
-        val side: String get() = translate("side")
-        val pokemon: String get() = translate("pokemon")
         val ally: String get() = translate("ally")
         val enemy: String get() = translate("enemy")
         val affected: String get() = translate("affected")
@@ -40,22 +39,17 @@ object BattleInfoPanel {
         fun pokemonCount(count: Int): String = if (count == 1) "$count $pokemonSingular" else "$count $pokemonPlural"
     }
 
-    // Opacity for minimized state (matches Cobblemon's BattleOverlay behavior)
-    private const val MINIMISED_OPACITY = 0.5f
     private var isMinimised: Boolean = false
 
     /**
      * Applies the current opacity (minimized state) to a color's alpha channel.
      */
-    private fun applyOpacity(color: Int): Int {
-        if (!isMinimised) return color
-        val a = ((color shr 24) and 0xFF)
-        val r = (color shr 16) and 0xFF
-        val g = (color shr 8) and 0xFF
-        val b = color and 0xFF
-        val newA = (a * MINIMISED_OPACITY).toInt()
-        return (newA shl 24) or (r shl 16) or (g shl 8) or b
-    }
+    private fun applyOpacity(color: Int): Int = UIUtils.applyMinimisedOpacity(color, isMinimised)
+
+    /**
+     * Returns a color transform lambda for drawPopupCell/drawPopupRowDivider.
+     */
+    private fun colorTransform(): (Int) -> Int = ::applyOpacity
 
     // Panel state
     var isExpanded: Boolean = false
@@ -92,11 +86,12 @@ object BattleInfoPanel {
     private var scrollbarDragStartY: Int = 0
     private var scrollbarDragStartOffset: Int = 0
 
+    // Frame tint (cool blue-gray)
+    private const val FRAME_TINT_R = 0.6f
+    private const val FRAME_TINT_G = 0.7f
+    private const val FRAME_TINT_B = 0.85f
+
     // Colors
-    private val PANEL_BG = UIUtils.color(22, 27, 34, 240)
-    private val HEADER_BG = UIUtils.color(30, 37, 46, 255)
-    private val SECTION_BG = UIUtils.color(26, 32, 40, 255)
-    private val BORDER_COLOR = UIUtils.color(55, 65, 80, 255)
     private val RESIZE_HANDLE_COLOR = UIUtils.color(100, 120, 140, 200)
     private val RESIZE_HANDLE_HOVER = UIUtils.color(130, 160, 190, 255)
     private val SCROLLBAR_BG = UIUtils.color(40, 48, 58, 200)
@@ -111,14 +106,14 @@ object BattleInfoPanel {
     private val ACCENT_PLAYER = UIUtils.color(100, 200, 255, 255)
     private val ACCENT_OPPONENT = UIUtils.color(255, 130, 110, 255)
     private val ACCENT_FIELD = UIUtils.color(255, 200, 100, 255)
+    private val HEADER_ACCENT = UIUtils.color(200, 165, 60, 180)
 
-    // Base layout constants (will be scaled based on panel size)
+    // Layout constants
     private const val BASE_PANEL_MARGIN = 10
-    private const val BASE_PADDING = 8
     private const val BASE_LINE_HEIGHT = 12
-    private const val BASE_SECTION_GAP = 6
-    private const val BASE_HEADER_HEIGHT = 22
     private const val SCROLLBAR_WIDTH = 3
+    private const val SECTION_LABEL_SCALE = 0.7f
+    private const val GROUP_DIVIDER_EXTRA = 4  // Extra spacing for group separators
 
     // Base font multiplier (makes default text ~20% larger)
     private const val BASE_FONT_MULTIPLIER = 1.2f
@@ -126,13 +121,22 @@ object BattleInfoPanel {
     // Text scale (base * user font preference only, no auto-scaling)
     private var textScale: Float = BASE_FONT_MULTIPLIER
 
-    // Fixed layout values
-    private const val PADDING = BASE_PADDING
-    private const val SECTION_GAP = BASE_SECTION_GAP
-    private const val HEADER_HEIGHT = BASE_HEADER_HEIGHT
-
     // Line height scales with font
     private var lineHeight: Int = BASE_LINE_HEIGHT
+
+    // Header padding (more generous than content cells)
+    private const val HEADER_VPAD_TOP = 6
+    private const val HEADER_VPAD_BOTTOM = 5
+    private const val HEADER_ACCENT_H = 1  // Gold accent line at bottom
+
+    // Header cell height (computed from text scale)
+    private val headerCellH: Int get() = HEADER_VPAD_TOP + (8 * 0.85f * textScale).toInt() + HEADER_VPAD_BOTTOM + HEADER_ACCENT_H
+
+    // Sub-label height (for side names inside content cell)
+    private fun subLabelHeight(): Int = (8 * SECTION_LABEL_SCALE * textScale).toInt() + 2
+
+    // Group divider height (row divider + extra spacing between major groups)
+    private fun groupDividerHeight(): Int = UIUtils.DIVIDER_H + GROUP_DIVIDER_EXTRA
 
     // Cached panel bounds for input detection
     private var panelBoundsX = 0
@@ -191,7 +195,6 @@ object BattleInfoPanel {
     }
 
     private fun getResizeZone(mouseX: Int, mouseY: Int): UIUtils.ResizeZone {
-        // Resizing is enabled for both expanded and collapsed modes
         val x = panelBoundsX
         val y = panelBoundsY
         val w = panelBoundsW
@@ -199,7 +202,7 @@ object BattleInfoPanel {
 
         val onLeft = mouseX >= x - RESIZE_HANDLE_SIZE && mouseX <= x + RESIZE_HANDLE_SIZE
         val onRight = mouseX >= x + w - RESIZE_HANDLE_SIZE && mouseX <= x + w + RESIZE_HANDLE_SIZE
-        val onTop = mouseY >= y - RESIZE_HANDLE_SIZE && mouseY <= y + 2  // Reduced to avoid header conflict
+        val onTop = mouseY >= y - RESIZE_HANDLE_SIZE && mouseY <= y + 2
         val onBottom = mouseY >= y + h - RESIZE_HANDLE_SIZE && mouseY <= y + h + RESIZE_HANDLE_SIZE
         val withinX = mouseX >= x - RESIZE_HANDLE_SIZE && mouseX <= x + w + RESIZE_HANDLE_SIZE
         val withinY = mouseY >= y - RESIZE_HANDLE_SIZE && mouseY <= y + h + RESIZE_HANDLE_SIZE
@@ -217,17 +220,23 @@ object BattleInfoPanel {
         }
     }
 
+    private fun calculateThumbHeight(trackHeight: Int): Int {
+        val minThumb = (trackHeight / 4).coerceIn(6, 20)
+        return ((visibleContentHeight.toFloat() / contentHeight) * trackHeight).toInt()
+            .coerceIn(minThumb, trackHeight)
+    }
+
     private fun isOverScrollbarThumb(mouseX: Int, mouseY: Int): Boolean {
         if (contentHeight <= visibleContentHeight) return false
 
-        val scrollbarX = panelBoundsX + panelBoundsW - SCROLLBAR_WIDTH - 2
-        val scrollbarY = headerEndY + 2
-        val scrollbarHeight = panelBoundsY + panelBoundsH - headerEndY - 4
+        val scrollbarX = panelBoundsX + panelBoundsW - UIUtils.FRAME_INSET - SCROLLBAR_WIDTH
+        val scrollbarY = headerEndY + UIUtils.CELL_GAP
+        val scrollbarHeight = panelBoundsY + panelBoundsH - UIUtils.FRAME_INSET - scrollbarY
 
         if (mouseX < scrollbarX || mouseX > scrollbarX + SCROLLBAR_WIDTH) return false
         if (mouseY < scrollbarY || mouseY > scrollbarY + scrollbarHeight) return false
 
-        val thumbHeight = ((visibleContentHeight.toFloat() / contentHeight) * scrollbarHeight).toInt().coerceAtLeast(20)
+        val thumbHeight = calculateThumbHeight(scrollbarHeight)
         val maxScroll = contentHeight - visibleContentHeight
         val scrollRatio = if (maxScroll > 0) PanelConfig.scrollOffset.toFloat() / maxScroll else 0f
         val thumbY = scrollbarY + ((scrollbarHeight - thumbHeight) * scrollRatio).toInt()
@@ -245,7 +254,6 @@ object BattleInfoPanel {
         wasToggleKeyPressed = isToggleDown
 
         // Font keybinds - only handle if no other panel has priority
-        // Priority: TeamIndicatorUI (tooltip/team panels) > BattleLogWidget > BattleInfoPanel (default)
         val otherPanelHasPriority = TeamIndicatorUI.shouldHandleFontInput() || BattleLogWidget.isMouseOverWidget() || MoveTooltipRenderer.shouldHandleFontInput()
 
         val increaseKey = InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.increaseFontKey.boundKeyTranslationKey)
@@ -271,7 +279,6 @@ object BattleInfoPanel {
         val screenWidth = mc.window.scaledWidth
         val screenHeight = mc.window.scaledHeight
 
-        // Only update hover state when this panel can interact
         val canInteract = UIUtils.canInteract(UIUtils.ActivePanel.INFO_PANEL)
         hoveredZone = if (!isDragging && !isResizing && !isScrollbarDragging && canInteract) getResizeZone(mouseX, mouseY) else if (!canInteract) UIUtils.ResizeZone.NONE else hoveredZone
         isOverScrollbar = if (!isDragging && !isResizing && !isScrollbarDragging && canInteract) isOverScrollbarThumb(mouseX, mouseY) else if (!canInteract) false else isOverScrollbar
@@ -289,8 +296,8 @@ object BattleInfoPanel {
                     scrollbarDragStartOffset = PanelConfig.scrollOffset
                 }
                 isScrollbarDragging -> {
-                    val scrollbarHeight = panelBoundsY + panelBoundsH - headerEndY - 4
-                    val thumbHeight = ((visibleContentHeight.toFloat() / contentHeight) * scrollbarHeight).toInt().coerceAtLeast(20)
+                    val scrollbarHeight = panelBoundsY + panelBoundsH - UIUtils.FRAME_INSET - headerEndY - UIUtils.CELL_GAP
+                    val thumbHeight = calculateThumbHeight(scrollbarHeight)
                     val trackHeight = scrollbarHeight - thumbHeight
 
                     if (trackHeight > 0) {
@@ -385,7 +392,6 @@ object BattleInfoPanel {
                     newX = newX.coerceIn(0, screenWidth - newWidth)
                     newY = newY.coerceIn(0, screenHeight - newHeight)
 
-                    // Save to appropriate config based on current mode
                     if (isExpanded) {
                         PanelConfig.setDimensions(newWidth, newHeight)
                     } else {
@@ -414,7 +420,6 @@ object BattleInfoPanel {
                 }
             }
         } else {
-            // Release interaction when mouse is released
             val wasInteracting = isScrollbarDragging || isResizing || isDragging
             if (isScrollbarDragging) {
                 isScrollbarDragging = false
@@ -449,18 +454,15 @@ object BattleInfoPanel {
                           scaledY >= panelBoundsY && scaledY <= panelBoundsY + panelBoundsH
 
         if (isOverPanel && deltaY != 0.0) {
-            // Check if Ctrl is held for font scaling
             val isCtrlHeld = GLFW.glfwGetKey(mc.window.handle, GLFW.GLFW_KEY_LEFT_CONTROL) == GLFW.GLFW_PRESS ||
                              GLFW.glfwGetKey(mc.window.handle, GLFW.GLFW_KEY_RIGHT_CONTROL) == GLFW.GLFW_PRESS
 
             if (isCtrlHeld) {
-                // Ctrl+Scroll: adjust font size
                 val delta = if (deltaY > 0) PanelConfig.FONT_SCALE_STEP else -PanelConfig.FONT_SCALE_STEP
                 PanelConfig.adjustFontScale(delta)
                 PanelConfig.save()
                 return true
             } else {
-                // Normal scroll: scroll content
                 val scrollAmount = (lineHeight * 2 * if (deltaY > 0) -1 else 1)
                 if (contentHeight > visibleContentHeight) {
                     val maxScroll = (contentHeight - visibleContentHeight).coerceAtLeast(0)
@@ -478,7 +480,6 @@ object BattleInfoPanel {
         // Handle battle exit (including spectator exit)
         if (battle == null) {
             if (wasInBattle) {
-                // We just exited a battle - clear all state
                 BattleStateTracker.clear()
                 TeamIndicatorUI.clear()
                 clearBattleState()
@@ -490,37 +491,24 @@ object BattleInfoPanel {
             return
         }
 
-        // Track minimized state - render greyed out instead of hiding
         isMinimised = battle.minimised
-
-        // Mark that we're now in a battle
         wasInBattle = true
-
-        // Clear state if this is a new battle
         BattleStateTracker.checkBattleChanged(battle.battleId)
 
         val mc = MinecraftClient.getInstance()
 
-        // Skip input handling when minimized (read-only)
         if (!isMinimised) {
             handleInput(mc)
         }
 
         val screenWidth = mc.window.scaledWidth
         val screenHeight = mc.window.scaledHeight
-
         val playerUUID = mc.player?.uuid ?: return
 
-        // Determine if player is in the battle and which side they're on
         val playerInSide1 = battle.side1.actors.any { it.uuid == playerUUID }
         val playerInSide2 = battle.side2.actors.any { it.uuid == playerUUID }
         val isSpectating = !playerInSide1 && !playerInSide2
 
-        // Determine player/opponent sides (or left/right when spectating)
-        // Cobblemon's BattleOverlay swaps sides based on player presence:
-        // - If player is in side1: side1 is LEFT, side2 is RIGHT
-        // - If player is in side2: side2 is LEFT, side1 is RIGHT
-        // - If spectating: side2 is LEFT, side1 is RIGHT
         val playerSide = when {
             playerInSide1 -> battle.side1
             playerInSide2 -> battle.side2
@@ -528,64 +516,44 @@ object BattleInfoPanel {
         }
         val opponentSide = if (playerSide == battle.side1) battle.side2 else battle.side1
 
-        // Get player names for section headers
-        val playerSideNames = getPlayerSideNames(playerSide, isSpectating, isPlayerSide = true)
-        val opponentSideNames = getPlayerSideNames(opponentSide, isSpectating, isPlayerSide = false)
+        val playerSideName = getPlayerSideName(playerSide, isSpectating, isPlayerSide = true)
+        val opponentSideName = getPlayerSideName(opponentSide, isSpectating, isPlayerSide = false)
 
-        // Set player names in BattleStateTracker for disambiguating mirror matches
-        // Use the raw actor names (not truncated) for matching
         val allyActorName = playerSide.actors.firstOrNull()?.displayName?.string ?: ""
         val opponentActorName = opponentSide.actors.firstOrNull()?.displayName?.string ?: ""
         BattleStateTracker.setPlayerNames(allyActorName, opponentActorName)
 
-        // Get ally and opponent Pokemon separately
         val allyPokemon = playerSide.activeClientBattlePokemon.mapNotNull { it.battlePokemon }
         val opponentPokemon = opponentSide.activeClientBattlePokemon.mapNotNull { it.battlePokemon }
-
-        // Get current active Pokemon UUIDs
         val currentActiveUUIDs = (allyPokemon + opponentPokemon).map { it.uuid }.toSet()
 
-        // Handle Pokemon switching out
-        // Check for Baton Pass before clearing - if used, stats/volatiles transfer to replacement
         for (uuid in previouslyActiveUUIDs) {
             if (uuid !in currentActiveUUIDs) {
-                // Check if this Pokemon used Baton Pass - if so, preserve stats for transfer
                 val usedBatonPass = BattleStateTracker.prepareBatonPassIfUsed(uuid)
                 if (!usedBatonPass) {
-                    // Normal switch: clear stats and volatiles
                     BattleStateTracker.clearPokemonStats(uuid)
                     BattleStateTracker.clearPokemonVolatiles(uuid)
                 }
-                // Always restore original types on switch-out (Burn Up, Soak, etc. are reset)
-                // This is separate from Baton Pass - type changes don't transfer
                 BattleStateTracker.restoreOriginalTypes(uuid)
             }
         }
         previouslyActiveUUIDs = currentActiveUUIDs
 
-        // Register Pokemon with ally status
-        // Register under both display name and species name for robust lookup
-        // Also register species ID for type tracking (needed for Burn Up, etc.)
         for (pokemon in allyPokemon) {
             BattleStateTracker.registerPokemon(pokemon.uuid, pokemon.displayName.string, isAlly = true)
-            // Also register under species name for consistent fallback lookup
             pokemon.properties.species?.let { speciesName ->
                 BattleStateTracker.registerPokemon(pokemon.uuid, speciesName, isAlly = true)
-                // Register species ID for type tracking
                 BattleStateTracker.registerSpeciesId(pokemon.uuid, Identifier.of("cobblemon", speciesName))
             }
         }
         for (pokemon in opponentPokemon) {
             BattleStateTracker.registerPokemon(pokemon.uuid, pokemon.displayName.string, isAlly = false)
-            // Also register under species name for consistent fallback lookup
             pokemon.properties.species?.let { speciesName ->
                 BattleStateTracker.registerPokemon(pokemon.uuid, speciesName, isAlly = false)
-                // Register species ID for type tracking
                 BattleStateTracker.registerSpeciesId(pokemon.uuid, Identifier.of("cobblemon", speciesName))
             }
         }
 
-        // Apply any pending Baton Pass data to newly switched-in Pokemon
         for (pokemon in allyPokemon) {
             BattleStateTracker.applyBatonPassIfPending(pokemon.uuid)
         }
@@ -593,7 +561,6 @@ object BattleInfoPanel {
             BattleStateTracker.applyBatonPassIfPending(pokemon.uuid)
         }
 
-        // Build Pokemon data with stat changes and volatile statuses, separated by side
         val allyPokemonData = allyPokemon.map { pokemon ->
             val statChanges = BattleStateTracker.getStatChanges(pokemon.uuid)
             val volatiles = BattleStateTracker.getVolatileStatuses(pokemon.uuid)
@@ -605,22 +572,20 @@ object BattleInfoPanel {
             PokemonBattleData(pokemon.uuid, pokemon.displayName.string, statChanges, volatiles, isAlly = false)
         }
 
-        // Update font scaling based on user preference
         updateScaledValues()
 
-        // Get panel dimensions - both modes support user resizing
         val panelWidth: Int
         val panelHeight: Int
 
         if (isExpanded) {
             panelWidth = PanelConfig.panelWidth ?: PanelConfig.DEFAULT_WIDTH
             contentHeight = calculateExpandedContentHeight(allyPokemonData, opponentPokemonData, panelWidth)
-            panelHeight = PanelConfig.panelHeight ?: (contentHeight + HEADER_HEIGHT + PADDING * 2)
+            val autoHeight = UIUtils.FRAME_INSET * 2 + headerCellH + UIUtils.CELL_GAP + contentHeight
+            panelHeight = PanelConfig.panelHeight ?: autoHeight
         } else {
-            // Collapsed: use collapsed dimensions if set, otherwise auto-fit
             panelWidth = PanelConfig.collapsedWidth ?: PanelConfig.DEFAULT_WIDTH
-            contentHeight = calculateCollapsedContentHeight(allyPokemonData, opponentPokemonData)
-            val autoHeight = contentHeight + HEADER_HEIGHT + PADDING * 2
+            contentHeight = calculateCollapsedContentHeight(allyPokemonData, opponentPokemonData, panelWidth)
+            val autoHeight = UIUtils.FRAME_INSET * 2 + headerCellH + UIUtils.CELL_GAP + contentHeight
             panelHeight = PanelConfig.collapsedHeight ?: autoHeight
         }
 
@@ -635,22 +600,656 @@ object BattleInfoPanel {
         panelBoundsW = panelWidth
         panelBoundsH = panelHeight
 
-        // Must match contentAreaHeight used in scissor: height - HEADER_HEIGHT - PADDING
-        visibleContentHeight = panelHeight - HEADER_HEIGHT - PADDING
+        // Visible content area: panel height minus frame insets, header cell, and gap
+        visibleContentHeight = panelHeight - UIUtils.FRAME_INSET * 2 - headerCellH - UIUtils.CELL_GAP
 
         val maxScroll = (contentHeight - visibleContentHeight).coerceAtLeast(0)
         PanelConfig.scrollOffset = PanelConfig.scrollOffset.coerceIn(0, maxScroll)
 
         if (isExpanded) {
-            renderExpanded(context, clampedX, clampedY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData, playerSideNames, opponentSideNames)
+            renderExpanded(context, clampedX, clampedY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData, playerSideName, opponentSideName)
         } else {
-            renderCollapsed(context, clampedX, clampedY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData, playerSideNames, opponentSideNames)
+            renderCollapsed(context, clampedX, clampedY, panelWidth, panelHeight, allyPokemonData, opponentPokemonData, playerSideName, opponentSideName)
         }
 
-        // Draw resize handles in both expanded and collapsed modes (skip when minimized)
         if (!isMinimised) {
             drawResizeHandles(context, clampedX, clampedY, panelWidth, panelHeight)
         }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Frame and header rendering
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private fun renderFrame(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
+        val opacity = if (isMinimised) UIUtils.MINIMISED_OPACITY else 1f
+        RenderSystem.enableBlend()
+        RenderSystem.defaultBlendFunc()
+        RenderSystem.setShaderColor(FRAME_TINT_R, FRAME_TINT_G, FRAME_TINT_B, opacity)
+        UIUtils.renderPopupFrame(context, x, y, width, height)
+        context.draw()
+        RenderSystem.setShaderColor(1f, 1f, 1f, 1f)
+    }
+
+    private fun renderHeader(context: DrawContext, x: Int, y: Int, width: Int) {
+        val cellX = x + UIUtils.FRAME_INSET
+        val cellW = width - UIUtils.FRAME_INSET * 2
+        val cellY = y + UIUtils.FRAME_INSET
+
+        UIUtils.drawPopupCell(context, cellX, cellY, cellW, headerCellH, colorTransform())
+        headerEndY = cellY + headerCellH
+
+        // Gold accent line at the bottom of the header cell
+        val accentY = cellY + headerCellH - HEADER_ACCENT_H - 1  // -1 to sit inside the cell border
+        context.fill(cellX + 1, accentY, cellX + cellW - 1, accentY + HEADER_ACCENT_H, applyOpacity(HEADER_ACCENT))
+
+        // Text positioned with top padding (visual centering between top pad and accent line)
+        val textH = (8 * 0.85f * textScale).toInt()
+        val availableH = headerCellH - HEADER_ACCENT_H - 1  // 1px cell border
+        val textY = cellY + (availableH - textH) / 2
+        val textX = cellX + UIUtils.CELL_PAD
+
+        val arrow = if (isExpanded) "▼" else "▶"
+        drawText(context, arrow, textX.toFloat(), textY.toFloat(), TEXT_GOLD, 0.85f * textScale)
+        drawText(context, "BATTLE INFO", (textX + (12 * textScale).toInt()).toFloat(), textY.toFloat(), TEXT_WHITE, 0.85f * textScale)
+
+        val turnText = "T${BattleStateTracker.currentTurn}"
+        val charWidth = (5 * textScale).toInt()
+        drawText(context, turnText, (cellX + cellW - UIUtils.CELL_PAD - turnText.length * charWidth).toFloat(),
+            textY.toFloat(), TEXT_GOLD, 0.85f * textScale)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Expanded mode
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private fun renderExpanded(
+        context: DrawContext,
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        allyPokemonData: List<PokemonBattleData>,
+        opponentPokemonData: List<PokemonBattleData>,
+        playerSideName: SideName,
+        opponentSideName: SideName
+    ) {
+        renderFrame(context, x, y, width, height)
+        renderHeader(context, x, y, width)
+
+        val cellX = x + UIUtils.FRAME_INSET
+        val cellW = width - UIUtils.FRAME_INSET * 2
+        val contentCellY = headerEndY + UIUtils.CELL_GAP
+        val contentCellH = height - UIUtils.FRAME_INSET * 2 - headerCellH - UIUtils.CELL_GAP
+
+        // Reserve scrollbar space
+        val needsScrollbar = contentHeight > visibleContentHeight
+        val scrollbarSpace = if (needsScrollbar) SCROLLBAR_WIDTH + 2 else 0
+        val effectiveW = cellW - scrollbarSpace
+
+        // Single cell fills ALL remaining space
+        UIUtils.drawPopupCell(context, cellX, contentCellY, effectiveW, contentCellH, colorTransform())
+
+        val contentX = cellX + UIUtils.CELL_PAD
+        val contentW = effectiveW - UIUtils.CELL_PAD * 2
+
+        enableScissor(cellX, contentCellY, effectiveW, contentCellH)
+
+        val startY = contentCellY + UIUtils.CELL_VPAD_TOP - PanelConfig.scrollOffset
+
+        renderExpandedContent(context, contentX, startY, contentW, allyPokemonData, opponentPokemonData, playerSideName, opponentSideName)
+
+        disableScissor()
+
+        if (needsScrollbar) {
+            val scrollbarX = x + width - UIUtils.FRAME_INSET - SCROLLBAR_WIDTH
+            renderScrollbar(context, scrollbarX, contentCellY, contentCellH)
+        }
+    }
+
+    /**
+     * Renders all expanded content groups sequentially within the single fill cell.
+     * Groups are separated by group dividers (row divider + extra spacing).
+     */
+    private fun renderExpandedContent(
+        context: DrawContext,
+        x: Int,
+        startY: Int,
+        width: Int,
+        allyPokemonData: List<PokemonBattleData>,
+        opponentPokemonData: List<PokemonBattleData>,
+        playerSideName: SideName,
+        opponentSideName: SideName
+    ) {
+        val hasGlobal = hasFieldEffects()
+        val hasAlly = hasAnySideConditions(true)
+        val hasEnemy = hasAnySideConditions(false)
+        val allPokemon = allyPokemonData + opponentPokemonData
+        val hasPokemonEffects = allPokemon.any { it.hasAnyEffects() }
+        val hasConditions = hasGlobal || hasAlly || hasEnemy
+
+        if (!hasConditions && !hasPokemonEffects) {
+            drawTextClipped(context, UI.noEffects, x.toFloat(), startY.toFloat(), TEXT_DIM, 0.8f * textScale)
+            return
+        }
+
+        val dividerX = x - UIUtils.CELL_PAD
+        val dividerW = width + UIUtils.CELL_PAD * 2
+        var curY = startY
+
+        if (hasGlobal) {
+            curY = renderFieldContent(context, x, curY, width)
+        }
+
+        if (hasGlobal && (hasAlly || hasEnemy)) {
+            curY = drawGroupDivider(context, dividerX, curY, dividerW)
+        }
+
+        if (hasAlly) {
+            drawTextClipped(context, playerSideName.name, x.toFloat(), curY.toFloat(), ACCENT_PLAYER, SECTION_LABEL_SCALE * textScale)
+            curY += subLabelHeight()
+            curY = renderSideContent(context, x, curY, width, isPlayer = true)
+        }
+
+        if (hasAlly && hasEnemy) {
+            curY = drawGroupDivider(context, dividerX, curY, dividerW)
+        }
+
+        if (hasEnemy) {
+            drawTextClipped(context, opponentSideName.name, x.toFloat(), curY.toFloat(), ACCENT_OPPONENT, SECTION_LABEL_SCALE * textScale)
+            curY += subLabelHeight()
+            curY = renderSideContent(context, x, curY, width, isPlayer = false)
+        }
+
+        if (hasConditions && hasPokemonEffects) {
+            curY = drawGroupDivider(context, dividerX, curY, dividerW)
+        }
+
+        if (hasPokemonEffects) {
+            renderPokemonContent(context, x, curY, width, allPokemon)
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Collapsed mode
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private fun renderCollapsed(
+        context: DrawContext,
+        x: Int,
+        y: Int,
+        width: Int,
+        height: Int,
+        allyPokemonData: List<PokemonBattleData>,
+        opponentPokemonData: List<PokemonBattleData>,
+        playerSideName: SideName,
+        opponentSideName: SideName
+    ) {
+        renderFrame(context, x, y, width, height)
+        renderHeader(context, x, y, width)
+
+        val cellX = x + UIUtils.FRAME_INSET
+        val cellW = width - UIUtils.FRAME_INSET * 2
+        val contentCellY = headerEndY + UIUtils.CELL_GAP
+        val contentCellH = height - UIUtils.FRAME_INSET * 2 - headerCellH - UIUtils.CELL_GAP
+
+        val needsScrollbar = contentHeight > visibleContentHeight
+        val scrollbarSpace = if (needsScrollbar) SCROLLBAR_WIDTH + 2 else 0
+        val effectiveW = cellW - scrollbarSpace
+
+        // Draw cell at FIXED position filling remaining space
+        UIUtils.drawPopupCell(context, cellX, contentCellY, effectiveW, contentCellH, colorTransform())
+
+        enableScissor(cellX, contentCellY, effectiveW, contentCellH)
+
+        // Content scrolls WITHIN the cell
+        val startY = contentCellY + UIUtils.CELL_VPAD_TOP - PanelConfig.scrollOffset
+        val textX = cellX + UIUtils.CELL_PAD
+        val textW = effectiveW - UIUtils.CELL_PAD * 2
+        renderCollapsedContent(context, textX, startY, textW, allyPokemonData, opponentPokemonData, playerSideName, opponentSideName)
+
+        disableScissor()
+
+        if (needsScrollbar) {
+            val scrollbarX = x + width - UIUtils.FRAME_INSET - SCROLLBAR_WIDTH
+            renderScrollbar(context, scrollbarX, contentCellY, contentCellH)
+        }
+    }
+
+    private fun renderCollapsedContent(
+        context: DrawContext,
+        x: Int,
+        startY: Int,
+        width: Int,
+        allyPokemonData: List<PokemonBattleData>,
+        opponentPokemonData: List<PokemonBattleData>,
+        playerSideName: SideName,
+        opponentSideName: SideName
+    ) {
+        var currentY = startY
+
+        val hasWeather = BattleStateTracker.weather != null
+        val hasTerrain = BattleStateTracker.terrain != null
+        val fieldConditions = BattleStateTracker.getFieldConditions()
+        val playerConds = BattleStateTracker.getPlayerSideConditions()
+        val oppConds = BattleStateTracker.getOpponentSideConditions()
+        val allyEffectCount = allyPokemonData.count { it.hasAnyEffects() }
+        val enemyEffectCount = opponentPokemonData.count { it.hasAnyEffects() }
+
+        val hasAnyEffects = hasWeather || hasTerrain || fieldConditions.isNotEmpty() ||
+                           playerConds.isNotEmpty() || oppConds.isNotEmpty() ||
+                           allyEffectCount > 0 || enemyEffectCount > 0
+
+        if (!hasAnyEffects) {
+            drawTextClipped(context, UI.noEffects, x.toFloat(), currentY.toFloat(), TEXT_DIM, 0.8f * textScale)
+            return
+        }
+
+        val dividerX = x - UIUtils.CELL_PAD
+        val dividerW = width + UIUtils.CELL_PAD * 2
+        var rowIndex = 0
+
+        BattleStateTracker.weather?.let { w ->
+            if (rowIndex > 0) {
+                UIUtils.drawPopupRowDivider(context, dividerX, dividerW, currentY, colorTransform())
+                currentY += UIUtils.DIVIDER_H
+            }
+            val turns = BattleStateTracker.getWeatherTurnsRemaining() ?: "?"
+            drawConditionLine(context, x, currentY, width, w.type.icon, w.type.displayName, turns, ACCENT_FIELD)
+            currentY += lineHeight
+            rowIndex++
+        }
+
+        BattleStateTracker.terrain?.let { t ->
+            if (rowIndex > 0) {
+                UIUtils.drawPopupRowDivider(context, dividerX, dividerW, currentY, colorTransform())
+                currentY += UIUtils.DIVIDER_H
+            }
+            val turns = BattleStateTracker.getTerrainTurnsRemaining() ?: "?"
+            drawConditionLine(context, x, currentY, width, t.type.icon, t.type.displayName, turns, ACCENT_FIELD)
+            currentY += lineHeight
+            rowIndex++
+        }
+
+        fieldConditions.forEach { (type, _) ->
+            if (rowIndex > 0) {
+                UIUtils.drawPopupRowDivider(context, dividerX, dividerW, currentY, colorTransform())
+                currentY += UIUtils.DIVIDER_H
+            }
+            val turns = BattleStateTracker.getFieldConditionTurnsRemaining(type) ?: "?"
+            drawConditionLine(context, x, currentY, width, type.icon, type.displayName, turns, ACCENT_FIELD)
+            currentY += lineHeight
+            rowIndex++
+        }
+
+        if (playerConds.isNotEmpty()) {
+            if (rowIndex > 0) {
+                UIUtils.drawPopupRowDivider(context, dividerX, dividerW, currentY, colorTransform())
+                currentY += UIUtils.DIVIDER_H
+            }
+            drawTextClipped(context, "${playerSideName.name}: ${playerConds.size} ${UI.effectCount(playerConds.size)}",
+                x.toFloat(), currentY.toFloat(), ACCENT_PLAYER, 0.8f * textScale)
+            currentY += (lineHeight * 0.9).toInt()
+            rowIndex++
+        }
+
+        if (oppConds.isNotEmpty()) {
+            if (rowIndex > 0) {
+                UIUtils.drawPopupRowDivider(context, dividerX, dividerW, currentY, colorTransform())
+                currentY += UIUtils.DIVIDER_H
+            }
+            drawTextClipped(context, "${opponentSideName.name}: ${oppConds.size} ${UI.effectCount(oppConds.size)}",
+                x.toFloat(), currentY.toFloat(), ACCENT_OPPONENT, 0.8f * textScale)
+            currentY += (lineHeight * 0.9).toInt()
+            rowIndex++
+        }
+
+        if (allyEffectCount > 0) {
+            if (rowIndex > 0) {
+                UIUtils.drawPopupRowDivider(context, dividerX, dividerW, currentY, colorTransform())
+                currentY += UIUtils.DIVIDER_H
+            }
+            drawTextClipped(context, "${playerSideName.name}: ${UI.pokemonCount(allyEffectCount)} ${UI.affected}",
+                x.toFloat(), currentY.toFloat(), ACCENT_PLAYER, 0.8f * textScale)
+            currentY += (lineHeight * 0.9).toInt()
+            rowIndex++
+        }
+
+        if (enemyEffectCount > 0) {
+            if (rowIndex > 0) {
+                UIUtils.drawPopupRowDivider(context, dividerX, dividerW, currentY, colorTransform())
+                currentY += UIUtils.DIVIDER_H
+            }
+            drawTextClipped(context, "${opponentSideName.name}: ${UI.pokemonCount(enemyEffectCount)} ${UI.affected}",
+                x.toFloat(), currentY.toFloat(), ACCENT_OPPONENT, 0.8f * textScale)
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Content renderers (expanded mode)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private fun renderFieldContent(context: DrawContext, x: Int, startY: Int, width: Int): Int {
+        var sy = startY
+        var rowIndex = 0
+
+        BattleStateTracker.weather?.let { w ->
+            val turns = BattleStateTracker.getWeatherTurnsRemaining() ?: "?"
+            drawConditionLine(context, x, sy, width, w.type.icon, w.type.displayName, turns, ACCENT_FIELD)
+            sy += lineHeight
+            rowIndex++
+        }
+
+        BattleStateTracker.terrain?.let { t ->
+            if (rowIndex > 0) {
+                UIUtils.drawPopupRowDivider(context, x - UIUtils.CELL_PAD, width + UIUtils.CELL_PAD * 2, sy, colorTransform())
+                sy += UIUtils.DIVIDER_H
+            }
+            val turns = BattleStateTracker.getTerrainTurnsRemaining() ?: "?"
+            drawConditionLine(context, x, sy, width, t.type.icon, t.type.displayName, turns, ACCENT_FIELD)
+            sy += lineHeight
+            rowIndex++
+        }
+
+        BattleStateTracker.getFieldConditions().forEach { (type, _) ->
+            if (rowIndex > 0) {
+                UIUtils.drawPopupRowDivider(context, x - UIUtils.CELL_PAD, width + UIUtils.CELL_PAD * 2, sy, colorTransform())
+                sy += UIUtils.DIVIDER_H
+            }
+            val turns = BattleStateTracker.getFieldConditionTurnsRemaining(type) ?: "?"
+            drawConditionLine(context, x, sy, width, type.icon, type.displayName, turns, ACCENT_FIELD)
+            sy += lineHeight
+            rowIndex++
+        }
+
+        return sy
+    }
+
+    private fun renderSideContent(context: DrawContext, x: Int, startY: Int, width: Int, isPlayer: Boolean): Int {
+        var sy = startY
+        val conditions = if (isPlayer) BattleStateTracker.getPlayerSideConditions() else BattleStateTracker.getOpponentSideConditions()
+        val accentColor = if (isPlayer) ACCENT_PLAYER else ACCENT_OPPONENT
+
+        var rowIndex = 0
+        conditions.forEach { (type, state) ->
+            if (rowIndex > 0) {
+                UIUtils.drawPopupRowDivider(context, x - UIUtils.CELL_PAD, width + UIUtils.CELL_PAD * 2, sy, colorTransform())
+                sy += UIUtils.DIVIDER_H
+            }
+            val turnsRemaining = BattleStateTracker.getSideConditionTurnsRemaining(isPlayer, type)
+            val info = when {
+                turnsRemaining != null -> turnsRemaining
+                state.stacks > 1 -> "x${state.stacks}"
+                else -> ""
+            }
+            drawConditionLine(context, x, sy, width, type.icon, type.displayName, info, accentColor)
+            sy += lineHeight
+            rowIndex++
+        }
+
+        return sy
+    }
+
+    private fun renderPokemonContent(context: DrawContext, x: Int, startY: Int, width: Int, pokemonData: List<PokemonBattleData>): Int {
+        var sy = startY
+
+        var pokemonIndex = 0
+        for (pokemon in pokemonData) {
+            if (!pokemon.hasAnyEffects()) continue
+
+            if (pokemonIndex > 0) {
+                UIUtils.drawPopupRowDivider(context, x - UIUtils.CELL_PAD, width + UIUtils.CELL_PAD * 2, sy, colorTransform())
+                sy += UIUtils.DIVIDER_H
+            }
+
+            // Pokemon name (colored by side)
+            val nameColor = if (pokemon.isAlly) ACCENT_PLAYER else ACCENT_OPPONENT
+            drawTextClipped(context, pokemon.name, x.toFloat(), sy.toFloat(), nameColor, 0.85f * textScale)
+            sy += (lineHeight * 0.95).toInt()
+
+            // Stat changes
+            if (pokemon.statChanges.isNotEmpty()) {
+                val sortedStats = pokemon.statChanges.entries.sortedBy { getStatSortOrderFromBattleStat(it.key) }
+                val charWidth = (5 * textScale).toInt()
+                val indentX = x + (8 * textScale).toInt()
+
+                var statX = indentX
+                for ((stat, value) in sortedStats) {
+                    val abbr = stat.abbr
+                    val arrows = if (value > 0) "↑".repeat(value) else "↓".repeat(-value)
+                    val color = if (value > 0) STAT_BOOST else STAT_DROP
+                    val entryWidth = ((abbr.length * charWidth) + 2 + (arrows.length * charWidth) + (8 * textScale)).toInt()
+
+                    if (statX + entryWidth > x + width && statX != indentX) {
+                        sy += (lineHeight * 0.9).toInt()
+                        statX = indentX
+                    }
+
+                    drawTextClipped(context, abbr, statX.toFloat(), sy.toFloat(), TEXT_LIGHT, 0.75f * textScale)
+                    statX += (abbr.length * charWidth) + 2
+                    drawTextClipped(context, arrows, statX.toFloat(), sy.toFloat(), color, 0.75f * textScale)
+                    statX += (arrows.length * charWidth) + (8 * textScale).toInt()
+                }
+                sy += (lineHeight * 0.9).toInt()
+            }
+
+            // Volatile effects
+            if (pokemon.volatiles.isNotEmpty()) {
+                val charWidth = (5 * textScale).toInt()
+                val indentX = x + (8 * textScale).toInt()
+                var effectX = indentX
+
+                for (volatileState in pokemon.volatiles) {
+                    val volatile = volatileState.type
+                    val turnsRemaining = BattleStateTracker.getVolatileTurnsRemaining(volatileState)
+                    val display = if (turnsRemaining != null) {
+                        "${volatile.icon} ${volatile.displayName} ($turnsRemaining)"
+                    } else {
+                        "${volatile.icon} ${volatile.displayName}"
+                    }
+                    val effectWidth = (display.length * charWidth * 0.8).toInt() + (10 * textScale).toInt()
+
+                    if (effectX + effectWidth > x + width && effectX != indentX) {
+                        sy += (lineHeight * 0.85).toInt()
+                        effectX = indentX
+                    }
+
+                    val effectColor = if (volatile.isNegative) STAT_DROP else STAT_BOOST
+                    drawTextClipped(context, display, effectX.toFloat(), sy.toFloat(), effectColor, 0.75f * textScale)
+                    effectX += effectWidth
+                }
+                sy += (lineHeight * 0.9).toInt()
+            }
+
+            pokemonIndex++
+        }
+
+        return sy
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Content detection and height calculation
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private fun hasFieldEffects(): Boolean {
+        return BattleStateTracker.weather != null ||
+               BattleStateTracker.terrain != null ||
+               BattleStateTracker.getFieldConditions().isNotEmpty()
+    }
+
+    private fun hasAnySideConditions(isPlayer: Boolean): Boolean {
+        return if (isPlayer) BattleStateTracker.getPlayerSideConditions().isNotEmpty()
+               else BattleStateTracker.getOpponentSideConditions().isNotEmpty()
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Height calculations
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private fun calculateFieldContentHeight(): Int {
+        val fieldCount = listOfNotNull(BattleStateTracker.weather, BattleStateTracker.terrain).size +
+                         BattleStateTracker.getFieldConditions().size
+        if (fieldCount == 0) return 0
+        val dividers = if (fieldCount > 1) (fieldCount - 1) * UIUtils.DIVIDER_H else 0
+        return fieldCount * lineHeight + dividers
+    }
+
+    private fun calculateSideContentHeight(isPlayer: Boolean): Int {
+        val count = if (isPlayer) BattleStateTracker.getPlayerSideConditions().size
+                    else BattleStateTracker.getOpponentSideConditions().size
+        if (count == 0) return 0
+        val dividers = if (count > 1) (count - 1) * UIUtils.DIVIDER_H else 0
+        return count * lineHeight + dividers
+    }
+
+    private fun calculatePokemonContentHeight(pokemonData: List<PokemonBattleData>, contentWidth: Int): Int {
+        val pokemonWithEffects = pokemonData.filter { it.hasAnyEffects() }
+        if (pokemonWithEffects.isEmpty()) return 0
+
+        var height = 0
+        val charWidth = (5 * textScale).toInt()
+        val indentX = (8 * textScale).toInt()
+        val maxX = contentWidth
+
+        for ((i, pokemon) in pokemonWithEffects.withIndex()) {
+            if (i > 0) height += UIUtils.DIVIDER_H  // divider between pokemon
+
+            height += (lineHeight * 0.95).toInt()  // Pokemon name
+
+            if (pokemon.statChanges.isNotEmpty()) {
+                var statX = indentX
+                val sortedStats = pokemon.statChanges.entries.sortedBy { getStatSortOrderFromBattleStat(it.key) }
+
+                for ((stat, value) in sortedStats) {
+                    val abbr = stat.abbr
+                    val arrowCount = kotlin.math.abs(value)
+                    val entryWidth = ((abbr.length * charWidth) + 2 + (arrowCount * charWidth) + (8 * textScale)).toInt()
+
+                    if (statX + entryWidth > maxX && statX != indentX) {
+                        height += (lineHeight * 0.9).toInt()
+                        statX = indentX
+                    }
+                    statX += entryWidth
+                }
+                height += (lineHeight * 0.9).toInt()
+            }
+
+            if (pokemon.volatiles.isNotEmpty()) {
+                var effectX = indentX
+
+                for (volatileState in pokemon.volatiles) {
+                    val volatile = volatileState.type
+                    val turnsRemaining = BattleStateTracker.getVolatileTurnsRemaining(volatileState)
+                    val display = if (turnsRemaining != null) {
+                        "${volatile.icon} ${volatile.displayName} ($turnsRemaining)"
+                    } else {
+                        "${volatile.icon} ${volatile.displayName}"
+                    }
+                    val effectWidth = (display.length * charWidth * 0.8).toInt() + (10 * textScale).toInt()
+
+                    if (effectX + effectWidth > maxX && effectX != indentX) {
+                        height += (lineHeight * 0.85).toInt()
+                        effectX = indentX
+                    }
+                    effectX += effectWidth
+                }
+                height += (lineHeight * 0.9).toInt()
+            }
+        }
+
+        return height
+    }
+
+    private fun calculateExpandedContentHeight(
+        allyPokemonData: List<PokemonBattleData>,
+        opponentPokemonData: List<PokemonBattleData>,
+        panelWidth: Int
+    ): Int {
+        // Always assume scrollbar for worst-case width
+        val effectiveW = panelWidth - UIUtils.FRAME_INSET * 2 - SCROLLBAR_WIDTH - 2
+        val contentWidth = effectiveW - UIUtils.CELL_PAD * 2
+
+        val hasGlobal = hasFieldEffects()
+        val hasAlly = hasAnySideConditions(true)
+        val hasEnemy = hasAnySideConditions(false)
+        val allPokemon = allyPokemonData + opponentPokemonData
+        val hasPokemonEffects = allPokemon.any { it.hasAnyEffects() }
+        val hasConditions = hasGlobal || hasAlly || hasEnemy
+
+        if (!hasConditions && !hasPokemonEffects) {
+            return UIUtils.CELL_VPAD_TOP + lineHeight + UIUtils.CELL_VPAD_BOTTOM
+        }
+
+        var height = UIUtils.CELL_VPAD_TOP
+
+        if (hasGlobal) height += calculateFieldContentHeight()
+        if (hasGlobal && (hasAlly || hasEnemy)) height += groupDividerHeight()
+
+        if (hasAlly) {
+            height += subLabelHeight()
+            height += calculateSideContentHeight(true)
+        }
+        if (hasAlly && hasEnemy) height += groupDividerHeight()
+
+        if (hasEnemy) {
+            height += subLabelHeight()
+            height += calculateSideContentHeight(false)
+        }
+
+        if (hasConditions && hasPokemonEffects) height += groupDividerHeight()
+
+        if (hasPokemonEffects) height += calculatePokemonContentHeight(allPokemon, contentWidth)
+
+        height += UIUtils.CELL_VPAD_BOTTOM
+        return height
+    }
+
+    private fun calculateCollapsedContentHeight(
+        allyPokemonData: List<PokemonBattleData>,
+        opponentPokemonData: List<PokemonBattleData>,
+        panelWidth: Int
+    ): Int {
+        var rowCount = 0
+
+        val hasWeather = BattleStateTracker.weather != null
+        val hasTerrain = BattleStateTracker.terrain != null
+        val fieldCount = BattleStateTracker.getFieldConditions().size
+        val playerConds = BattleStateTracker.getPlayerSideConditions()
+        val oppConds = BattleStateTracker.getOpponentSideConditions()
+        val allyEffectCount = allyPokemonData.count { it.hasAnyEffects() }
+        val enemyEffectCount = opponentPokemonData.count { it.hasAnyEffects() }
+
+        val hasAnyEffects = hasWeather || hasTerrain || fieldCount > 0 ||
+                           playerConds.isNotEmpty() || oppConds.isNotEmpty() ||
+                           allyEffectCount > 0 || enemyEffectCount > 0
+
+        if (!hasAnyEffects) {
+            return UIUtils.CELL_VPAD_TOP + lineHeight + UIUtils.CELL_VPAD_BOTTOM
+        }
+
+        var contentH = 0
+        if (hasWeather) { contentH += lineHeight; rowCount++ }
+        if (hasTerrain) { contentH += lineHeight; rowCount++ }
+        contentH += fieldCount * lineHeight; rowCount += fieldCount
+        if (playerConds.isNotEmpty()) { contentH += (lineHeight * 0.9).toInt(); rowCount++ }
+        if (oppConds.isNotEmpty()) { contentH += (lineHeight * 0.9).toInt(); rowCount++ }
+        if (allyEffectCount > 0) { contentH += (lineHeight * 0.9).toInt(); rowCount++ }
+        if (enemyEffectCount > 0) { contentH += (lineHeight * 0.9).toInt(); rowCount++ }
+
+        // Add dividers between rows
+        val dividers = if (rowCount > 1) (rowCount - 1) * UIUtils.DIVIDER_H else 0
+
+        return UIUtils.CELL_VPAD_TOP + contentH + dividers + UIUtils.CELL_VPAD_BOTTOM
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Common rendering helpers
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    private fun drawGroupDivider(context: DrawContext, x: Int, y: Int, width: Int): Int {
+        val divY = y + GROUP_DIVIDER_EXTRA / 2
+        UIUtils.drawPopupRowDivider(context, x, width, divY, colorTransform())
+        return divY + UIUtils.DIVIDER_H + GROUP_DIVIDER_EXTRA / 2
     }
 
     private fun drawResizeHandles(context: DrawContext, x: Int, y: Int, w: Int, h: Int) {
@@ -681,404 +1280,13 @@ object BattleInfoPanel {
 
         context.fill(x, y, x + SCROLLBAR_WIDTH, y + height, applyOpacity(SCROLLBAR_BG))
 
-        // Calculate thumb height with a smaller minimum, and ensure it doesn't exceed available space
-        val minThumbHeight = (height / 4).coerceIn(6, 20)
-        val thumbHeight = ((visibleContentHeight.toFloat() / contentHeight) * height).toInt()
-            .coerceIn(minThumbHeight, height)
+        val thumbHeight = calculateThumbHeight(height)
         val maxScroll = contentHeight - visibleContentHeight
         val scrollRatio = if (maxScroll > 0) PanelConfig.scrollOffset.toFloat() / maxScroll else 0f
         val thumbY = y + ((height - thumbHeight) * scrollRatio).toInt()
 
         val thumbColor = if (isOverScrollbar || isScrollbarDragging) SCROLLBAR_THUMB_HOVER else SCROLLBAR_THUMB
         context.fill(x, thumbY, x + SCROLLBAR_WIDTH, thumbY + thumbHeight, applyOpacity(thumbColor))
-    }
-
-    private fun renderCollapsed(
-        context: DrawContext,
-        x: Int,
-        y: Int,
-        width: Int,
-        height: Int,
-        allyPokemonData: List<PokemonBattleData>,
-        opponentPokemonData: List<PokemonBattleData>,
-        playerSideNames: SideNames,
-        opponentSideNames: SideNames
-    ) {
-        drawRoundedRect(context, x, y, width, height, PANEL_BG, BORDER_COLOR)
-        renderHeader(context, x, y, width)
-
-        val contentStartY = y + HEADER_HEIGHT + 2
-        val contentAreaHeight = height - HEADER_HEIGHT - PADDING / 2
-
-        // Determine if we need scrollbar space (add threshold to avoid showing for tiny differences)
-        val needsScrollbar = contentHeight > visibleContentHeight + 4
-        val contentWidth = if (needsScrollbar) width - SCROLLBAR_WIDTH - 4 else width - 2
-
-        enableScissor(context, x + 1, contentStartY, contentWidth, contentAreaHeight)
-
-        // Apply scroll offset to starting Y position
-        var currentY = contentStartY + 2 - PanelConfig.scrollOffset
-
-        val hasWeather = BattleStateTracker.weather != null
-        val hasTerrain = BattleStateTracker.terrain != null
-        val fieldConditions = BattleStateTracker.getFieldConditions()
-        val playerConds = BattleStateTracker.getPlayerSideConditions()
-        val oppConds = BattleStateTracker.getOpponentSideConditions()
-
-        // Count Pokemon with any effects (stats or volatiles)
-        val allyEffectCount = allyPokemonData.count { it.hasAnyEffects() }
-        val enemyEffectCount = opponentPokemonData.count { it.hasAnyEffects() }
-
-        val hasAnyEffects = hasWeather || hasTerrain || fieldConditions.isNotEmpty() ||
-                           playerConds.isNotEmpty() || oppConds.isNotEmpty() ||
-                           allyEffectCount > 0 || enemyEffectCount > 0
-
-        if (!hasAnyEffects) {
-            drawText(context, UI.noEffects, (x + PADDING).toFloat(), currentY.toFloat(), TEXT_DIM, 0.8f * textScale)
-        } else {
-            BattleStateTracker.weather?.let { w ->
-                val turns = BattleStateTracker.getWeatherTurnsRemaining() ?: "?"
-                drawText(context, "${w.type.icon} ${w.type.displayName}", (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_FIELD, 0.8f * textScale)
-                drawText(context, turns, (x + width - PADDING - turns.length * (5 * textScale).toInt()).toFloat(), currentY.toFloat(), TEXT_DIM, 0.75f * textScale)
-                currentY += lineHeight
-            }
-
-            BattleStateTracker.terrain?.let { t ->
-                val turns = BattleStateTracker.getTerrainTurnsRemaining() ?: "?"
-                drawText(context, "${t.type.icon} ${t.type.displayName}", (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_FIELD, 0.8f * textScale)
-                drawText(context, turns, (x + width - PADDING - turns.length * (5 * textScale).toInt()).toFloat(), currentY.toFloat(), TEXT_DIM, 0.75f * textScale)
-                currentY += lineHeight
-            }
-
-            fieldConditions.forEach { (type, _) ->
-                val turns = BattleStateTracker.getFieldConditionTurnsRemaining(type) ?: "?"
-                drawText(context, "${type.icon} ${type.displayName}", (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_FIELD, 0.8f * textScale)
-                drawText(context, turns, (x + width - PADDING - turns.length * (5 * textScale).toInt()).toFloat(), currentY.toFloat(), TEXT_DIM, 0.75f * textScale)
-                currentY += lineHeight
-            }
-
-            if (playerConds.isNotEmpty()) {
-                drawText(context, "${playerSideNames.sideName}: ${playerConds.size} ${UI.effectCount(playerConds.size)}",
-                    (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_PLAYER, 0.8f * textScale)
-                currentY += (lineHeight * 0.9).toInt()
-            }
-
-            if (oppConds.isNotEmpty()) {
-                drawText(context, "${opponentSideNames.sideName}: ${oppConds.size} ${UI.effectCount(oppConds.size)}",
-                    (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_OPPONENT, 0.8f * textScale)
-                currentY += (lineHeight * 0.9).toInt()
-            }
-
-            if (allyEffectCount > 0) {
-                drawText(context, "${playerSideNames.possessiveName}: ${UI.pokemonCount(allyEffectCount)} ${UI.affected}",
-                    (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_PLAYER, 0.8f * textScale)
-                currentY += (lineHeight * 0.9).toInt()
-            }
-
-            if (enemyEffectCount > 0) {
-                drawText(context, "${opponentSideNames.possessiveName}: ${UI.pokemonCount(enemyEffectCount)} ${UI.affected}",
-                    (x + PADDING).toFloat(), currentY.toFloat(), ACCENT_OPPONENT, 0.8f * textScale)
-            }
-        }
-
-        disableScissor()
-
-        // Render scrollbar if content exceeds visible area
-        if (needsScrollbar) {
-            renderScrollbar(context, x + width - SCROLLBAR_WIDTH - 2, contentStartY, contentAreaHeight)
-        }
-    }
-
-    private fun renderExpanded(
-        context: DrawContext,
-        x: Int,
-        y: Int,
-        width: Int,
-        height: Int,
-        allyPokemonData: List<PokemonBattleData>,
-        opponentPokemonData: List<PokemonBattleData>,
-        playerSideNames: SideNames,
-        opponentSideNames: SideNames
-    ) {
-        drawRoundedRect(context, x, y, width, height, PANEL_BG, BORDER_COLOR)
-        renderHeader(context, x, y, width)
-
-        // Render content
-        renderInfoTab(context, x, y, width, height, allyPokemonData, opponentPokemonData, playerSideNames, opponentSideNames)
-    }
-
-    private fun renderInfoTab(
-        context: DrawContext,
-        x: Int,
-        y: Int,
-        width: Int,
-        height: Int,
-        allyPokemonData: List<PokemonBattleData>,
-        opponentPokemonData: List<PokemonBattleData>,
-        playerSideNames: SideNames,
-        opponentSideNames: SideNames
-    ) {
-        val contentStartY = y + HEADER_HEIGHT + SECTION_GAP
-        val contentAreaHeight = height - HEADER_HEIGHT - PADDING
-        val scrollbarSpace = if (contentHeight > visibleContentHeight) SCROLLBAR_WIDTH + 4 else 0
-        val contentWidth = width - scrollbarSpace
-
-        enableScissor(context, x + 1, contentStartY, contentWidth - 2, contentAreaHeight)
-
-        var currentY = contentStartY - PanelConfig.scrollOffset
-
-        // FIELD section
-        currentY = renderSection(context, x, currentY, contentWidth, UI.field, ACCENT_FIELD) { sectionY ->
-            var sy = sectionY
-            var hasContent = false
-
-            BattleStateTracker.weather?.let { w ->
-                val turns = BattleStateTracker.getWeatherTurnsRemaining() ?: "?"
-                drawConditionLine(context, x + PADDING, sy, contentWidth - PADDING * 2,
-                    w.type.icon, w.type.displayName, turns, ACCENT_FIELD)
-                sy += lineHeight
-                hasContent = true
-            }
-
-            BattleStateTracker.terrain?.let { t ->
-                val turns = BattleStateTracker.getTerrainTurnsRemaining() ?: "?"
-                drawConditionLine(context, x + PADDING, sy, contentWidth - PADDING * 2,
-                    t.type.icon, t.type.displayName, turns, ACCENT_FIELD)
-                sy += lineHeight
-                hasContent = true
-            }
-
-            BattleStateTracker.getFieldConditions().forEach { (type, _) ->
-                val turns = BattleStateTracker.getFieldConditionTurnsRemaining(type) ?: "?"
-                drawConditionLine(context, x + PADDING, sy, contentWidth - PADDING * 2,
-                    type.icon, type.displayName, turns, ACCENT_FIELD)
-                sy += lineHeight
-                hasContent = true
-            }
-
-            if (!hasContent) {
-                drawText(context, UI.noneActive, (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
-                sy += lineHeight
-            }
-            sy
-        }
-
-        currentY += SECTION_GAP
-
-        // ALLY SIDE EFFECTS section (screens, hazards on your side)
-        currentY = renderSection(context, x, currentY, contentWidth, "${playerSideNames.sideName} ${UI.side}", ACCENT_PLAYER) { sectionY ->
-            var sy = sectionY
-            val conditions = BattleStateTracker.getPlayerSideConditions()
-
-            if (conditions.isNotEmpty()) {
-                conditions.forEach { (type, state) ->
-                    val info = when {
-                        BattleStateTracker.getSideConditionTurnsRemaining(true, type) != null ->
-                            BattleStateTracker.getSideConditionTurnsRemaining(true, type)!!
-                        state.stacks > 1 -> "x${state.stacks}"
-                        else -> ""
-                    }
-                    drawConditionLine(context, x + PADDING, sy, contentWidth - PADDING * 2,
-                        type.icon, type.displayName, info, ACCENT_PLAYER)
-                    sy += lineHeight
-                }
-            } else {
-                drawText(context, UI.noneActive, (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
-                sy += lineHeight
-            }
-            sy
-        }
-
-        currentY += SECTION_GAP
-
-        // ENEMY SIDE EFFECTS section (screens, hazards on enemy side)
-        currentY = renderSection(context, x, currentY, contentWidth, "${opponentSideNames.sideName} ${UI.side}", ACCENT_OPPONENT) { sectionY ->
-            var sy = sectionY
-            val conditions = BattleStateTracker.getOpponentSideConditions()
-
-            if (conditions.isNotEmpty()) {
-                conditions.forEach { (type, state) ->
-                    val info = when {
-                        BattleStateTracker.getSideConditionTurnsRemaining(false, type) != null ->
-                            BattleStateTracker.getSideConditionTurnsRemaining(false, type)!!
-                        state.stacks > 1 -> "x${state.stacks}"
-                        else -> ""
-                    }
-                    drawConditionLine(context, x + PADDING, sy, contentWidth - PADDING * 2,
-                        type.icon, type.displayName, info, ACCENT_OPPONENT)
-                    sy += lineHeight
-                }
-            } else {
-                drawText(context, UI.noneActive, (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
-                sy += lineHeight
-            }
-            sy
-        }
-
-        currentY += SECTION_GAP
-
-        // YOUR POKÉMON section
-        currentY = renderSection(context, x, currentY, contentWidth, "${playerSideNames.possessiveName} ${UI.pokemon}", ACCENT_PLAYER) { sectionY ->
-            renderPokemonSection(context, x, sectionY, contentWidth, allyPokemonData)
-        }
-
-        currentY += SECTION_GAP
-
-        // ENEMY POKÉMON section
-        renderSection(context, x, currentY, contentWidth, "${opponentSideNames.possessiveName} ${UI.pokemon}", ACCENT_OPPONENT) { sectionY ->
-            renderPokemonSection(context, x, sectionY, contentWidth, opponentPokemonData)
-        }
-
-        disableScissor()
-
-        if (contentHeight > visibleContentHeight) {
-            renderScrollbar(context, x + width - SCROLLBAR_WIDTH - 2, contentStartY, contentAreaHeight)
-        }
-    }
-
-    private fun renderPokemonSection(
-        context: DrawContext,
-        x: Int,
-        startY: Int,
-        contentWidth: Int,
-        pokemonData: List<PokemonBattleData>
-    ): Int {
-        var sy = startY
-
-        val hasAnyEffects = pokemonData.any { it.hasAnyEffects() }
-
-        if (!hasAnyEffects) {
-            drawTextClipped(context, UI.noEffects, (x + PADDING).toFloat(), sy.toFloat(), TEXT_DIM, 0.8f * textScale)
-            sy += lineHeight
-            return sy
-        }
-
-        for (pokemon in pokemonData) {
-            if (!pokemon.hasAnyEffects()) continue
-
-            // Pokemon name
-            drawTextClipped(context, pokemon.name, (x + PADDING).toFloat(), sy.toFloat(), TEXT_WHITE, 0.85f * textScale)
-            sy += (lineHeight * 0.95).toInt()
-
-            // Stat changes (if any)
-            if (pokemon.statChanges.isNotEmpty()) {
-                val sortedStats = pokemon.statChanges.entries.sortedBy { getStatSortOrderFromBattleStat(it.key) }
-                val charWidth = (5 * textScale).toInt()
-                val startX = x + PADDING + (8 * textScale).toInt()
-
-                var statX = startX
-                for ((stat, value) in sortedStats) {
-                    val abbr = stat.abbr
-                    val arrows = if (value > 0) "↑".repeat(value) else "↓".repeat(-value)
-                    val color = if (value > 0) STAT_BOOST else STAT_DROP
-
-                    val entryWidth = ((abbr.length * charWidth) + 2 + (arrows.length * charWidth) + (8 * textScale)).toInt()
-
-                    if (statX + entryWidth > x + contentWidth - PADDING && statX != startX) {
-                        sy += (lineHeight * 0.9).toInt()
-                        statX = startX
-                    }
-
-                    drawTextClipped(context, abbr, statX.toFloat(), sy.toFloat(), TEXT_LIGHT, 0.75f * textScale)
-                    statX += (abbr.length * charWidth) + 2
-                    drawTextClipped(context, arrows, statX.toFloat(), sy.toFloat(), color, 0.75f * textScale)
-                    statX += (arrows.length * charWidth) + (8 * textScale).toInt()
-                }
-                sy += (lineHeight * 0.9).toInt()
-            }
-
-            // Volatile effects (if any)
-            if (pokemon.volatiles.isNotEmpty()) {
-                val charWidth = (5 * textScale).toInt()
-                val startX = x + PADDING + (8 * textScale).toInt()
-                var effectX = startX
-
-                for (volatileState in pokemon.volatiles) {
-                    val volatile = volatileState.type
-                    // Add turn count if available
-                    val turnsRemaining = BattleStateTracker.getVolatileTurnsRemaining(volatileState)
-                    val display = if (turnsRemaining != null) {
-                        "${volatile.icon} ${volatile.displayName} ($turnsRemaining)"
-                    } else {
-                        "${volatile.icon} ${volatile.displayName}"
-                    }
-                    val effectWidth = (display.length * charWidth * 0.8).toInt() + (10 * textScale).toInt()
-
-                    // Wrap to next line if needed
-                    if (effectX + effectWidth > x + contentWidth - PADDING && effectX != startX) {
-                        sy += (lineHeight * 0.85).toInt()
-                        effectX = startX
-                    }
-
-                    // Color based on whether effect is negative for the Pokemon
-                    val effectColor = if (volatile.isNegative) STAT_DROP else STAT_BOOST
-                    drawTextClipped(context, display, effectX.toFloat(), sy.toFloat(), effectColor, 0.75f * textScale)
-                    effectX += effectWidth
-                }
-                sy += (lineHeight * 0.9).toInt()
-            }
-        }
-
-        return sy
-    }
-
-    private fun enableScissor(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
-        scissorBounds = UIUtils.enableScissor(x, y, width, height)
-    }
-
-    private fun disableScissor() {
-        UIUtils.disableScissor()
-    }
-
-    private fun renderHeader(context: DrawContext, x: Int, y: Int, width: Int) {
-        context.fill(x + 1, y + 1, x + width - 1, y + HEADER_HEIGHT, applyOpacity(HEADER_BG))
-        headerEndY = y + HEADER_HEIGHT
-        context.fill(x, y + HEADER_HEIGHT - 1, x + width, y + HEADER_HEIGHT, applyOpacity(BORDER_COLOR))
-
-        val headerTextY = y + (HEADER_HEIGHT - (8 * textScale).toInt()) / 2
-
-        if (isExpanded) {
-            // Expanded mode: show title and turn indicator
-            val arrow = "▼"
-            drawText(context, arrow, (x + PADDING).toFloat(), headerTextY.toFloat(), TEXT_GOLD, 0.85f * textScale)
-            drawText(context, "BATTLE INFO", (x + PADDING + (12 * textScale).toInt()).toFloat(), headerTextY.toFloat(), TEXT_WHITE, 0.85f * textScale)
-
-            val turnText = "T${BattleStateTracker.currentTurn}"
-            val charWidth = (5 * textScale).toInt()
-            drawText(context, turnText, (x + width - PADDING - turnText.length * charWidth).toFloat(),
-                headerTextY.toFloat(), TEXT_GOLD, 0.85f * textScale)
-        } else {
-            // Collapsed mode: show arrow and title
-            val arrow = "▶"
-            drawText(context, arrow, (x + PADDING).toFloat(), headerTextY.toFloat(), TEXT_GOLD, 0.85f * textScale)
-            drawText(context, "BATTLE INFO", (x + PADDING + (12 * textScale).toInt()).toFloat(), headerTextY.toFloat(), TEXT_WHITE, 0.85f * textScale)
-
-            val turnText = "T${BattleStateTracker.currentTurn}"
-            val charWidth = (5 * textScale).toInt()
-            drawText(context, turnText, (x + width - PADDING - turnText.length * charWidth).toFloat(),
-                headerTextY.toFloat(), TEXT_GOLD, 0.85f * textScale)
-        }
-    }
-
-    private fun renderSection(
-        context: DrawContext,
-        x: Int,
-        y: Int,
-        width: Int,
-        title: String,
-        accentColor: Int,
-        contentRenderer: (Int) -> Int
-    ): Int {
-        val sectionHeight = lineHeight + 1
-        context.fill(x + 1, y, x + width - 1, y + sectionHeight, applyOpacity(SECTION_BG))
-        context.fill(x + 1, y, x + 3, y + sectionHeight, applyOpacity(accentColor))
-
-        // Vertically center the title text in the section header
-        val textHeight = (8 * 0.7f * textScale).toInt()
-        val titleY = y + (sectionHeight - textHeight) / 2
-        drawText(context, title, (x + PADDING).toFloat(), titleY.toFloat(), accentColor, 0.7f * textScale)
-
-        return contentRenderer(y + sectionHeight + 1)
     }
 
     private fun drawConditionLine(
@@ -1092,163 +1300,20 @@ object BattleInfoPanel {
         accentColor: Int
     ) {
         val charWidth = (5 * textScale).toInt()
-        drawText(context, icon, x.toFloat(), y.toFloat(), accentColor, 0.8f * textScale)
-        drawText(context, name, (x + (14 * textScale).toInt()).toFloat(), y.toFloat(), TEXT_LIGHT, 0.8f * textScale)
+        drawTextClipped(context, icon, x.toFloat(), y.toFloat(), accentColor, 0.8f * textScale)
+        drawTextClipped(context, name, (x + (14 * textScale).toInt()).toFloat(), y.toFloat(), TEXT_LIGHT, 0.8f * textScale)
         if (info.isNotEmpty()) {
             val infoWidth = info.length * charWidth
-            drawText(context, info, (x + width - infoWidth).toFloat(), y.toFloat(), TEXT_DIM, 0.75f * textScale)
+            drawTextClipped(context, info, (x + width - infoWidth).toFloat(), y.toFloat(), TEXT_DIM, 0.75f * textScale)
         }
     }
 
-    private fun drawRoundedRect(context: DrawContext, x: Int, y: Int, w: Int, h: Int, fillColor: Int, borderColor: Int) {
-        context.fill(x + 1, y + 1, x + w - 1, y + h - 1, applyOpacity(fillColor))
-        context.fill(x, y + 1, x + 1, y + h - 1, applyOpacity(borderColor))
-        context.fill(x + w - 1, y + 1, x + w, y + h - 1, applyOpacity(borderColor))
-        context.fill(x + 1, y, x + w - 1, y + 1, applyOpacity(borderColor))
-        context.fill(x + 1, y + h - 1, x + w - 1, y + h, applyOpacity(borderColor))
+    private fun enableScissor(x: Int, y: Int, width: Int, height: Int) {
+        scissorBounds = UIUtils.enableScissor(x, y, width, height)
     }
 
-    private fun calculateCollapsedContentHeight(
-        allyPokemonData: List<PokemonBattleData>,
-        opponentPokemonData: List<PokemonBattleData>
-    ): Int {
-        var height = PADDING / 2
-
-        val hasWeather = BattleStateTracker.weather != null
-        val hasTerrain = BattleStateTracker.terrain != null
-        val fieldCount = BattleStateTracker.getFieldConditions().size
-        val playerConds = BattleStateTracker.getPlayerSideConditions()
-        val oppConds = BattleStateTracker.getOpponentSideConditions()
-
-        // Count Pokemon with any effects (stats or volatiles)
-        val allyEffectCount = allyPokemonData.count { it.hasAnyEffects() }
-        val enemyEffectCount = opponentPokemonData.count { it.hasAnyEffects() }
-
-        val hasAnyEffects = hasWeather || hasTerrain || fieldCount > 0 ||
-                           playerConds.isNotEmpty() || oppConds.isNotEmpty() ||
-                           allyEffectCount > 0 || enemyEffectCount > 0
-
-        if (!hasAnyEffects) {
-            height += lineHeight  // "No effects" text
-        } else {
-            if (hasWeather) height += lineHeight
-            if (hasTerrain) height += lineHeight
-            height += fieldCount * lineHeight
-            if (playerConds.isNotEmpty()) height += (lineHeight * 0.9).toInt()
-            if (oppConds.isNotEmpty()) height += (lineHeight * 0.9).toInt()
-            if (allyEffectCount > 0) height += (lineHeight * 0.9).toInt()
-            if (enemyEffectCount > 0) height += (lineHeight * 0.9).toInt()
-        }
-
-        return height
-    }
-
-    private fun calculateExpandedContentHeight(
-        allyPokemonData: List<PokemonBattleData>,
-        opponentPokemonData: List<PokemonBattleData>,
-        panelWidth: Int
-    ): Int {
-        // Content starts at contentStartY (no initial gap - first section starts immediately)
-        var height = 0
-
-        // Field section
-        height += lineHeight + 2  // Section header
-        val fieldCount = listOfNotNull(BattleStateTracker.weather, BattleStateTracker.terrain).size +
-                         BattleStateTracker.getFieldConditions().size
-        height += (if (fieldCount > 0) fieldCount else 1) * lineHeight
-        height += SECTION_GAP
-
-        // Ally Side section
-        height += lineHeight + 2  // Section header
-        val playerCount = BattleStateTracker.getPlayerSideConditions().size
-        height += (if (playerCount > 0) playerCount else 1) * lineHeight
-        height += SECTION_GAP
-
-        // Enemy Side section
-        height += lineHeight + 2  // Section header
-        val opponentCount = BattleStateTracker.getOpponentSideConditions().size
-        height += (if (opponentCount > 0) opponentCount else 1) * lineHeight
-        height += SECTION_GAP
-
-        // Your Pokemon section
-        height += lineHeight + 2  // Section header
-        height += calculatePokemonSectionHeight(allyPokemonData, panelWidth)
-        height += SECTION_GAP
-
-        // Enemy Pokemon section
-        height += lineHeight + 2  // Section header
-        height += calculatePokemonSectionHeight(opponentPokemonData, panelWidth)
-
-        return height
-    }
-
-    private fun calculatePokemonSectionHeight(
-        pokemonData: List<PokemonBattleData>,
-        panelWidth: Int
-    ): Int {
-        val pokemonWithEffects = pokemonData.filter { it.hasAnyEffects() }
-
-        if (pokemonWithEffects.isEmpty()) {
-            return lineHeight  // "No effects" text
-        }
-
-        var height = 0
-
-        // Always assume scrollbar is present for height calculation (worst case)
-        val scrollbarSpace = SCROLLBAR_WIDTH + 4
-        val contentWidth = panelWidth - scrollbarSpace
-        val charWidth = (5 * textScale).toInt()
-        val startX = PADDING + (8 * textScale).toInt()
-        val maxX = contentWidth - PADDING
-
-        for (pokemon in pokemonWithEffects) {
-            height += (lineHeight * 0.95).toInt()  // Pokemon name
-
-            // Stats line(s)
-            if (pokemon.statChanges.isNotEmpty()) {
-                var statX = startX
-                val sortedStats = pokemon.statChanges.entries.sortedBy { getStatSortOrderFromBattleStat(it.key) }
-
-                for ((stat, value) in sortedStats) {
-                    val abbr = stat.abbr
-                    val arrowCount = kotlin.math.abs(value)
-                    val entryWidth = ((abbr.length * charWidth) + 2 + (arrowCount * charWidth) + (8 * textScale)).toInt()
-
-                    if (statX + entryWidth > maxX && statX != startX) {
-                        height += (lineHeight * 0.9).toInt()  // Line wrap
-                        statX = startX
-                    }
-                    statX += entryWidth
-                }
-                height += (lineHeight * 0.9).toInt()  // Final stat line
-            }
-
-            // Volatile effects line(s)
-            if (pokemon.volatiles.isNotEmpty()) {
-                var effectX = startX
-
-                for (volatileState in pokemon.volatiles) {
-                    val volatile = volatileState.type
-                    // Account for turn count in width calculation
-                    val turnsRemaining = BattleStateTracker.getVolatileTurnsRemaining(volatileState)
-                    val display = if (turnsRemaining != null) {
-                        "${volatile.icon} ${volatile.displayName} ($turnsRemaining)"
-                    } else {
-                        "${volatile.icon} ${volatile.displayName}"
-                    }
-                    val effectWidth = (display.length * charWidth * 0.8).toInt() + (10 * textScale).toInt()
-
-                    if (effectX + effectWidth > maxX && effectX != startX) {
-                        height += (lineHeight * 0.85).toInt()  // Line wrap
-                        effectX = startX
-                    }
-                    effectX += effectWidth
-                }
-                height += (lineHeight * 0.9).toInt()  // Final volatile line
-            }
-        }
-
-        return height
+    private fun disableScissor() {
+        UIUtils.disableScissor()
     }
 
     private fun drawText(context: DrawContext, text: String, x: Float, y: Float, color: Int, scale: Float) {
@@ -1271,28 +1336,24 @@ object BattleInfoPanel {
         }
     }
 
-    data class SideNames(
-        val sideName: String,      // e.g., "PLAYER123"
-        val possessiveName: String // e.g., "PLAYER123"
-    )
+    @JvmInline
+    value class SideName(val name: String)
 
-    private fun getPlayerSideNames(side: ClientBattleSide, isSpectating: Boolean, isPlayerSide: Boolean): SideNames {
+    private fun getPlayerSideName(side: ClientBattleSide, isSpectating: Boolean, isPlayerSide: Boolean): SideName {
         val actors = side.actors
         if (actors.isEmpty()) {
-            return if (isPlayerSide) SideNames(UI.ally, UI.ally) else SideNames(UI.enemy, UI.enemy)
+            return if (isPlayerSide) SideName(UI.ally) else SideName(UI.enemy)
         }
 
-        // Get the first actor's display name
         val firstActorName = actors.firstOrNull()?.displayName?.string
-            ?: return if (isPlayerSide) SideNames(UI.ally, UI.ally) else SideNames(UI.enemy, UI.enemy)
+            ?: return if (isPlayerSide) SideName(UI.ally) else SideName(UI.enemy)
 
-        // Truncate long names to fit in section headers
         val truncatedName = if (firstActorName.length > 12) {
             firstActorName.take(11) + "…"
         } else {
             firstActorName
         }
 
-        return SideNames(truncatedName.uppercase(), truncatedName.uppercase())
+        return SideName(truncatedName.uppercase())
     }
 }

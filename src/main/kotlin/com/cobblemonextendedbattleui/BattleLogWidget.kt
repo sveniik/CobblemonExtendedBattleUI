@@ -59,25 +59,11 @@ object BattleLogWidget {
     // Colors - matching Cobblemon's battle log style
     // ═══════════════════════════════════════════════════════════════════════════
 
-    private fun color(r: Int, g: Int, b: Int, a: Int = 255): Int = (a shl 24) or (r shl 16) or (g shl 8) or b
+    private fun color(r: Int, g: Int, b: Int, a: Int = 255): Int = UIUtils.color(r, g, b, a)
 
-    /**
-     * Applies the current opacity (minimized state) to a color's alpha channel.
-     */
-    private fun applyOpacity(color: Int): Int {
-        if (!isMinimised) return color
-        val a = ((color shr 24) and 0xFF)
-        val r = (color shr 16) and 0xFF
-        val g = (color shr 8) and 0xFF
-        val b = color and 0xFF
-        val newA = (a * MINIMISED_OPACITY).toInt()
-        return (newA shl 24) or (r shl 16) or (g shl 8) or b
-    }
+    private fun applyOpacity(color: Int): Int = UIUtils.applyMinimisedOpacity(color, isMinimised)
 
-    /**
-     * Gets the current opacity multiplier based on minimized state.
-     */
-    private fun getCurrentOpacity(): Float = if (isMinimised) MINIMISED_OPACITY else 1f
+    private fun getCurrentOpacity(): Float = if (isMinimised) UIUtils.MINIMISED_OPACITY else 1f
 
     // Text colors
     private val TEXT_DIM = color(150, 160, 175)
@@ -101,12 +87,6 @@ object BattleLogWidget {
     // Resize handles
     private val RESIZE_HANDLE_COLOR = color(80, 100, 130, 180)
     private val RESIZE_HANDLE_HOVER = color(120, 150, 190, 255)
-
-    // ═══════════════════════════════════════════════════════════════════════════
-    // Opacity for minimized state (matches Cobblemon's BattleOverlay behavior)
-    // ═══════════════════════════════════════════════════════════════════════════
-
-    private const val MINIMISED_OPACITY = 0.5f
 
     // ═══════════════════════════════════════════════════════════════════════════
     // State
@@ -563,7 +543,7 @@ object BattleLogWidget {
 
     private fun handleFontKeybinds(handle: Long) {
         val increaseKey = InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.increaseFontKey.boundKeyTranslationKey)
-        val isIncreaseDown = isKeyOrButtonPressed(handle, increaseKey)
+        val isIncreaseDown = UIUtils.isKeyOrButtonPressed(handle, increaseKey)
         if (isIncreaseDown && !wasIncreaseFontKeyPressed) {
             PanelConfig.adjustLogFontScale(PanelConfig.FONT_SCALE_STEP)
             BattleLog.invalidateWrappedTextCache()  // Font scale changed, invalidate cache
@@ -572,20 +552,13 @@ object BattleLogWidget {
         wasIncreaseFontKeyPressed = isIncreaseDown
 
         val decreaseKey = InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.decreaseFontKey.boundKeyTranslationKey)
-        val isDecreaseDown = isKeyOrButtonPressed(handle, decreaseKey)
+        val isDecreaseDown = UIUtils.isKeyOrButtonPressed(handle, decreaseKey)
         if (isDecreaseDown && !wasDecreaseFontKeyPressed) {
             PanelConfig.adjustLogFontScale(-PanelConfig.FONT_SCALE_STEP)
             BattleLog.invalidateWrappedTextCache()  // Font scale changed, invalidate cache
             PanelConfig.save()
         }
         wasDecreaseFontKeyPressed = isDecreaseDown
-    }
-
-    private fun isKeyOrButtonPressed(handle: Long, key: InputUtil.Key): Boolean {
-        return when (key.category) {
-            InputUtil.Type.MOUSE -> GLFW.glfwGetMouseButton(handle, key.code) == GLFW.GLFW_PRESS
-            else -> GLFW.glfwGetKey(handle, key.code) == GLFW.GLFW_PRESS
-        }
     }
 
     private fun getResizeZone(mouseX: Int, mouseY: Int): UIUtils.ResizeZone {

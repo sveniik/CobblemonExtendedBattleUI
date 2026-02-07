@@ -92,24 +92,14 @@ object TeamIndicatorUI {
     private val COLOR_KO_BAND = color(40, 40, 40)
     private val COLOR_KO_CENTER = color(100, 100, 100)
 
-    private fun color(r: Int, g: Int, b: Int, a: Int = 255): Int = (a shl 24) or (r shl 16) or (g shl 8) or b
+    private fun color(r: Int, g: Int, b: Int, a: Int = 255): Int = UIUtils.color(r, g, b, a)
 
-    // Opacity for minimized state (matches Cobblemon's BattleOverlay behavior)
-    private const val MINIMISED_OPACITY = 0.5f
     private var isMinimised: Boolean = false
 
     /**
      * Applies the current opacity (minimized state) to a color's alpha channel.
      */
-    private fun applyOpacity(color: Int): Int {
-        if (!isMinimised) return color
-        val a = ((color shr 24) and 0xFF)
-        val r = (color shr 16) and 0xFF
-        val g = (color shr 8) and 0xFF
-        val b = color and 0xFF
-        val newA = (a * MINIMISED_OPACITY).toInt()
-        return (newA shl 24) or (r shl 16) or (g shl 8) or b
-    }
+    internal fun applyOpacity(color: Int): Int = UIUtils.applyMinimisedOpacity(color, isMinimised)
 
     // Track Pokemon as they're revealed in battle
     data class TrackedPokemon(
@@ -227,7 +217,7 @@ object TeamIndicatorUI {
     // Currently rendered tooltip bounds (for input handling)
     private var tooltipBounds: TooltipBoundsData? = null
 
-    private data class TooltipBoundsData(val x: Int, val y: Int, val width: Int, val height: Int)
+    internal data class TooltipBoundsData(val x: Int, val y: Int, val width: Int, val height: Int)
 
     // Team panel bounds (for input handling - covers all pokeball indicators)
     private var leftTeamPanelBounds: TooltipBoundsData? = null
@@ -264,31 +254,31 @@ object TeamIndicatorUI {
     // Mouse button state tracking
     private var wasMouseButtonDown = false
 
-    // Tooltip colors
-    private val TOOLTIP_BG = color(22, 27, 34, 245)
-    private val TOOLTIP_BORDER = color(55, 65, 80, 255)
-    private val TOOLTIP_TEXT = color(220, 225, 230, 255)
-    private val TOOLTIP_HEADER = color(255, 255, 255, 255)
-    private val TOOLTIP_LABEL = color(140, 150, 165, 255)
-    private val TOOLTIP_DIM = color(100, 110, 120, 255)
-    private val TOOLTIP_HP_HIGH = color(100, 220, 100, 255)
-    private val TOOLTIP_HP_MED = color(220, 180, 50, 255)
-    private val TOOLTIP_HP_LOW = color(220, 80, 80, 255)
-    private val TOOLTIP_STAT_BOOST = color(100, 200, 100, 255)
-    private val TOOLTIP_STAT_DROP = color(200, 100, 100, 255)
-    private const val TOOLTIP_PADDING = 6
-    private const val TOOLTIP_CORNER = 3
-    private const val TOOLTIP_BASE_LINE_HEIGHT = 10  // Base line height before scaling
-    private const val TOOLTIP_FONT_SCALE = 0.85f     // Base font scale multiplier
-    private val TOOLTIP_SPEED = color(150, 180, 220, 255)
-    private val TOOLTIP_DEFENSE = color(150, 220, 180, 255)
-    private val TOOLTIP_SPECIAL_DEFENSE = color(180, 150, 220, 255)
-    private val TOOLTIP_ATTACK = color(220, 150, 150, 255)
-    private val TOOLTIP_SPECIAL_ATTACK = color(220, 180, 150, 255)
-    private val TOOLTIP_PP = color(255, 210, 80, 255)
-    private val TOOLTIP_PP_LOW = color(255, 100, 80, 255)
-    private val TOOLTIP_ABILITY = color(200, 180, 255, 255)           // Purple for known ability
-    private val TOOLTIP_ABILITY_POSSIBLE = color(160, 150, 180, 255)  // Dimmer purple for possible abilities
+    // Tooltip colors (internal for PokemonInfoPopup access)
+    internal val TOOLTIP_BG = color(22, 27, 34, 245)
+    internal val TOOLTIP_BORDER = color(55, 65, 80, 255)
+    internal val TOOLTIP_TEXT = color(220, 225, 230, 255)
+    internal val TOOLTIP_HEADER = color(255, 255, 255, 255)
+    internal val TOOLTIP_LABEL = color(140, 150, 165, 255)
+    internal val TOOLTIP_DIM = color(100, 110, 120, 255)
+    internal val TOOLTIP_HP_HIGH = color(100, 220, 100, 255)
+    internal val TOOLTIP_HP_MED = color(220, 180, 50, 255)
+    internal val TOOLTIP_HP_LOW = color(220, 80, 80, 255)
+    internal val TOOLTIP_STAT_BOOST = color(100, 200, 100, 255)
+    internal val TOOLTIP_STAT_DROP = color(200, 100, 100, 255)
+    internal const val TOOLTIP_PADDING = 6
+    internal const val TOOLTIP_CORNER = 3
+    internal const val TOOLTIP_BASE_LINE_HEIGHT = 10  // Base line height before scaling
+    internal const val TOOLTIP_FONT_SCALE = 0.85f     // Base font scale multiplier
+    internal val TOOLTIP_SPEED = color(150, 180, 220, 255)
+    internal val TOOLTIP_DEFENSE = color(150, 220, 180, 255)
+    internal val TOOLTIP_SPECIAL_DEFENSE = color(180, 150, 220, 255)
+    internal val TOOLTIP_ATTACK = color(220, 150, 150, 255)
+    internal val TOOLTIP_SPECIAL_ATTACK = color(220, 180, 150, 255)
+    internal val TOOLTIP_PP = color(255, 210, 80, 255)
+    internal val TOOLTIP_PP_LOW = color(255, 100, 80, 255)
+    internal val TOOLTIP_ABILITY = color(200, 180, 255, 255)           // Purple for known ability
+    internal val TOOLTIP_ABILITY_POSSIBLE = color(160, 150, 180, 255)  // Dimmer purple for possible abilities
 
     // Ability ID -> Display Name lookup for compound words that can't be split programmatically
     private val ABILITY_DISPLAY_NAMES = mapOf(
@@ -389,7 +379,7 @@ object TeamIndicatorUI {
      * Format an ability ID into a proper display name.
      * Uses lookup table for compound words, falls back to formatting for unknown abilities.
      */
-    private fun formatAbilityName(abilityId: String): String {
+    internal fun formatAbilityName(abilityId: String): String {
         // Check lookup first
         ABILITY_DISPLAY_NAMES[abilityId.lowercase()]?.let { return it }
 
@@ -413,7 +403,7 @@ object TeamIndicatorUI {
      * Get the stat stage multiplier for a given stage (-6 to +6).
      * Uses the standard Pokemon formula: (2 + stage) / 2 for positive, 2 / (2 - stage) for negative.
      */
-    private fun getStageMultiplier(stage: Int): Double {
+    internal fun getStageMultiplier(stage: Int): Double {
         return if (stage >= 0) {
             (2.0 + stage) / 2.0
         } else {
@@ -425,7 +415,7 @@ object TeamIndicatorUI {
      * Calculate a stat value using the standard Pokemon formula.
      * stat = floor((floor((2 * base + iv + floor(ev/4)) * level / 100) + 5) * nature)
      */
-    private fun calculateStat(base: Int, level: Int, iv: Int, ev: Int, natureMod: Double): Int {
+    internal fun calculateStat(base: Int, level: Int, iv: Int, ev: Int, natureMod: Double): Int {
         val inner = ((2 * base + iv + ev / 4) * level / 100) + 5
         return (inner * natureMod).toInt()
     }
@@ -435,13 +425,13 @@ object TeamIndicatorUI {
     /**
      * Normalize ability name for comparison (lowercase, no spaces/underscores).
      */
-    private fun normalizeAbilityName(name: String?): String? =
+    internal fun normalizeAbilityName(name: String?): String? =
         name?.lowercase()?.replace(" ", "")?.replace("_", "")
 
     /**
      * Weather-based speed-doubling abilities.
      */
-    private val WEATHER_SPEED_ABILITIES = mapOf(
+    internal val WEATHER_SPEED_ABILITIES = mapOf(
         "chlorophyll" to BattleStateTracker.Weather.SUN,
         "swiftswim" to BattleStateTracker.Weather.RAIN,
         "sandrush" to BattleStateTracker.Weather.SANDSTORM,
@@ -451,7 +441,7 @@ object TeamIndicatorUI {
     /**
      * Terrain-based speed abilities.
      */
-    private val TERRAIN_SPEED_ABILITIES = mapOf(
+    internal val TERRAIN_SPEED_ABILITIES = mapOf(
         "surgesurfer" to BattleStateTracker.Terrain.ELECTRIC
     )
 
@@ -459,7 +449,7 @@ object TeamIndicatorUI {
      * Get speed multiplier from ability given current battle conditions.
      * Returns 1.0 if ability doesn't affect speed or conditions aren't met.
      */
-    private fun getAbilitySpeedMultiplier(
+    internal fun getAbilitySpeedMultiplier(
         abilityName: String?,
         weather: BattleStateTracker.Weather?,
         terrain: BattleStateTracker.Terrain?,
@@ -498,7 +488,7 @@ object TeamIndicatorUI {
      * Get speed multiplier from status condition.
      * Quick Feet negates paralysis speed penalty.
      */
-    private fun getStatusSpeedMultiplier(status: Status?, abilityName: String?): Double {
+    internal fun getStatusSpeedMultiplier(status: Status?, abilityName: String?): Double {
         if (status == Statuses.PARALYSIS) {
             // Quick Feet ignores paralysis speed penalty
             if (normalizeAbilityName(abilityName) == "quickfeet") return 1.0
@@ -510,7 +500,7 @@ object TeamIndicatorUI {
     /**
      * Get speed multiplier from held item.
      */
-    private fun getItemSpeedMultiplier(itemName: String?): Double {
+    internal fun getItemSpeedMultiplier(itemName: String?): Double {
         if (itemName == null) return 1.0
         val normalizedItem = itemName.lowercase().replace(" ", "").replace("_", "")
         return when (normalizedItem) {
@@ -524,7 +514,7 @@ object TeamIndicatorUI {
      * Get Attack multiplier from held item.
      * Supports: Choice Band (1.5x), Thick Club (2x for Cubone/Marowak), Light Ball (2x for Pikachu)
      */
-    private fun getItemAttackMultiplier(itemName: String?, speciesName: String?): Double {
+    internal fun getItemAttackMultiplier(itemName: String?, speciesName: String?): Double {
         if (itemName == null) return 1.0
         val normalizedItem = itemName.lowercase().replace(" ", "").replace("_", "")
         val species = speciesName?.lowercase()?.replace(" ", "")?.replace("-", "") ?: ""
@@ -540,7 +530,7 @@ object TeamIndicatorUI {
      * Get Special Attack multiplier from held item.
      * Supports: Choice Specs (1.5x), Light Ball (2x for Pikachu), Deep Sea Tooth (2x for Clamperl)
      */
-    private fun getItemSpecialAttackMultiplier(itemName: String?, speciesName: String?): Double {
+    internal fun getItemSpecialAttackMultiplier(itemName: String?, speciesName: String?): Double {
         if (itemName == null) return 1.0
         val normalizedItem = itemName.lowercase().replace(" ", "").replace("_", "")
         val species = speciesName?.lowercase()?.replace(" ", "")?.replace("-", "") ?: ""
@@ -556,7 +546,7 @@ object TeamIndicatorUI {
      * Get Defense multiplier from held item.
      * Supports: Eviolite (1.5x for non-fully evolved Pokemon)
      */
-    private fun getItemDefenseMultiplier(itemName: String?, canEvolve: Boolean): Double {
+    internal fun getItemDefenseMultiplier(itemName: String?, canEvolve: Boolean): Double {
         if (itemName == null) return 1.0
         val normalizedItem = itemName.lowercase().replace(" ", "").replace("_", "")
         return when {
@@ -569,7 +559,7 @@ object TeamIndicatorUI {
      * Get Special Defense multiplier from held item.
      * Supports: Assault Vest (1.5x), Eviolite (1.5x for non-fully evolved), Deep Sea Scale (2x for Clamperl)
      */
-    private fun getItemSpecialDefenseMultiplier(itemName: String?, speciesName: String?, canEvolve: Boolean): Double {
+    internal fun getItemSpecialDefenseMultiplier(itemName: String?, speciesName: String?, canEvolve: Boolean): Double {
         if (itemName == null) return 1.0
         val normalizedItem = itemName.lowercase().replace(" ", "").replace("_", "")
         val species = speciesName?.lowercase()?.replace(" ", "")?.replace("-", "") ?: ""
@@ -585,7 +575,7 @@ object TeamIndicatorUI {
      * Check if a Pokemon can still evolve (for Eviolite eligibility).
      * Returns true if the species has any evolutions defined.
      */
-    private fun canPokemonEvolve(pokemonId: Identifier?): Boolean {
+    internal fun canPokemonEvolve(pokemonId: Identifier?): Boolean {
         if (pokemonId == null) return false
         val species = PokemonSpecies.getByIdentifier(pokemonId) ?: return false
         return species.evolutions.isNotEmpty()
@@ -595,7 +585,7 @@ object TeamIndicatorUI {
      * Check if species can have any speed-boosting ability that's currently active.
      * Returns the max multiplier if any ability could apply, 1.0 otherwise.
      */
-    private fun getMaxPossibleAbilitySpeedMultiplier(
+    internal fun getMaxPossibleAbilitySpeedMultiplier(
         pokemonId: Identifier,
         weather: BattleStateTracker.Weather?,
         terrain: BattleStateTracker.Terrain?,
@@ -619,7 +609,7 @@ object TeamIndicatorUI {
     /**
      * Calculate effective speed for player's Pokemon with all modifiers.
      */
-    private fun calculateEffectiveSpeed(
+    internal fun calculateEffectiveSpeed(
         baseSpeed: Int,
         speedStage: Int,
         abilityName: String?,
@@ -642,7 +632,7 @@ object TeamIndicatorUI {
     /**
      * Result of opponent speed range calculation.
      */
-    data class SpeedRangeResult(
+    internal data class SpeedRangeResult(
         val minSpeed: Int,
         val maxSpeed: Int,
         val abilityNote: String? = null,  // Note if ability could boost speed
@@ -657,7 +647,7 @@ object TeamIndicatorUI {
      * This prevents inflated max speed from impossible abilities (e.g., Swift Swim showing
      * when we KNOW the Kabutops has Battle Armor).
      */
-    private fun calculateOpponentSpeedRange(
+    internal fun calculateOpponentSpeedRange(
         uuid: UUID,
         pokemonId: Identifier,
         level: Int,
@@ -2825,385 +2815,13 @@ object TeamIndicatorUI {
         val mc = MinecraftClient.getInstance()
         val screenWidth = mc.window.scaledWidth
         val screenHeight = mc.window.scaledHeight
-        val textRenderer = mc.textRenderer
 
-        // Calculate font scale based on tooltip-specific config
-        val fontScale = TOOLTIP_FONT_SCALE * PanelConfig.tooltipFontScale
-        val lineHeight = (TOOLTIP_BASE_LINE_HEIGHT * fontScale).toInt().coerceAtLeast(8)
-
-        // Build tooltip lines: each line is a list of (text, color) segments
-        val lines = mutableListOf<List<Pair<String, Int>>>()
-
-        // Name color: use Tera type if Terastallized, otherwise primary type
-        val nameColor = if (data.isTerastallized && data.activeTeraTypeName != null) {
-            ElementalTypes.get(data.activeTeraTypeName.lowercase())?.let { UIUtils.getTypeColor(it) } ?: TOOLTIP_HEADER
-        } else {
-            data.primaryType?.let { UIUtils.getTypeColor(it) } ?: TOOLTIP_HEADER
-        }
-        lines.add(listOf(data.pokemonName to nameColor))
-
-        // Types
-        // When Terastallized, show the active Tera type as the main type (since it becomes the defensive type)
-        // Note: A Pokemon can be completely typeless (e.g., after Burn Up on a mono-Fire type).
-        // When a dual-type Pokemon loses one type (e.g., Pawmot using Double Shock), show only
-        // the remaining type - don't show "???" unless the Pokemon has NO types at all.
-        if (data.isTerastallized && data.activeTeraTypeName != null) {
-            // Pokemon is currently Terastallized - show Tera type as main type
-            val teraElementalType = ElementalTypes.get(data.activeTeraTypeName.lowercase())
-            val typeSegments = mutableListOf<Pair<String, Int>>()
-
-            // Show "Tera [Type]" as the active type
-            typeSegments.add("Tera " to TOOLTIP_LABEL)
-            if (teraElementalType != null) {
-                typeSegments.add(teraElementalType.displayName.string to UIUtils.getTypeColor(teraElementalType))
-            } else {
-                typeSegments.add(data.activeTeraTypeName to TOOLTIP_TEXT)
-            }
-
-            // Show original types in parentheses (dimmed)
-            val originalTypes = mutableListOf<String>()
-            data.primaryType?.let { originalTypes.add(it.displayName.string) }
-            data.secondaryType?.let { originalTypes.add(it.displayName.string) }
-            if (originalTypes.isNotEmpty()) {
-                typeSegments.add(" (was " to TOOLTIP_DIM)
-                typeSegments.add(originalTypes.joinToString("/") to TOOLTIP_DIM)
-                typeSegments.add(")" to TOOLTIP_DIM)
-            }
-
-            lines.add(typeSegments)
-        } else {
-            // Normal type display (not Terastallized)
-            val hasAnyTypeInfo = data.primaryType != null || data.lostPrimaryType || data.secondaryType != null || data.addedTypes.isNotEmpty()
-            val isCompletelyTypeless = data.primaryType == null && data.secondaryType == null && data.addedTypes.isEmpty()
-
-            if (hasAnyTypeInfo || isCompletelyTypeless) {
-                val typeSegments = mutableListOf<Pair<String, Int>>()
-
-                // Primary type - only show "???" if COMPLETELY typeless (no secondary or added types either)
-                if (data.primaryType != null) {
-                    typeSegments.add(data.primaryType.displayName.string to UIUtils.getTypeColor(data.primaryType))
-                } else if (isCompletelyTypeless) {
-                    // Only show "???" when Pokemon has NO types at all (e.g., mono-Fire after Burn Up)
-                    typeSegments.add("???" to TOOLTIP_DIM)
-                }
-                // If primary is null but secondary exists (e.g., Pawmot after Double Shock), skip primary entirely
-
-                // Secondary type
-                if (data.secondaryType != null) {
-                    if (typeSegments.isNotEmpty()) {
-                        typeSegments.add(" / " to TOOLTIP_DIM)
-                    }
-                    typeSegments.add(data.secondaryType.displayName.string to UIUtils.getTypeColor(data.secondaryType))
-                }
-
-                // Added types (from Trick-or-Treat, Forest's Curse)
-                for (addedType in data.addedTypes) {
-                    if (typeSegments.isNotEmpty()) {
-                        typeSegments.add(" + " to TOOLTIP_DIM)
-                    }
-                    // Look up ElementalType for color, fall back to default if not found
-                    val elementalType = ElementalTypes.get(addedType.lowercase())
-                    if (elementalType != null) {
-                        typeSegments.add(elementalType.displayName.string to UIUtils.getTypeColor(elementalType))
-                    } else {
-                        typeSegments.add(addedType to TOOLTIP_TEXT)
-                    }
-                }
-
-                if (typeSegments.isNotEmpty()) {
-                    lines.add(typeSegments)
-                }
-            }
-
-            // Tera Type (only show if known, enabled in settings, and NOT actively Terastallized)
-            // When Terastallized, we already show it above as the main type
-            if (PanelConfig.showTeraType && data.teraType != null) {
-                val typeSegments = mutableListOf<Pair<String, Int>>()
-                typeSegments.add("Tera Type: " to TOOLTIP_LABEL)
-                val elementalType = ElementalTypes.get(data.teraType.showdownId())
-                if (elementalType != null) {
-                    typeSegments.add(elementalType.displayName.string to UIUtils.getTypeColor(elementalType))
-                } else {
-                    typeSegments.add(data.teraType.name to TOOLTIP_TEXT)
-                }
-                lines.add(typeSegments)
-            }
-        }
-
-        // Ability
-        if (data.abilityName != null) {
-            // Known ability (player Pokemon or revealed opponent ability)
-            lines.add(listOf("Ability: ${data.abilityName}" to TOOLTIP_ABILITY))
-        } else if (!data.possibleAbilities.isNullOrEmpty()) {
-            // Unknown ability - show possible abilities
-            val abilitySegments = mutableListOf<Pair<String, Int>>()
-            abilitySegments.add("Ability: " to TOOLTIP_LABEL)
-            data.possibleAbilities.forEachIndexed { index, ability ->
-                if (index > 0) {
-                    abilitySegments.add(" / " to TOOLTIP_DIM)
-                }
-                abilitySegments.add(ability to TOOLTIP_ABILITY_POSSIBLE)
-            }
-            lines.add(abilitySegments)
-        }
-
-        // HP percentage
-        val hpColor = when {
-            data.isKO -> color(100, 100, 100)
-            data.hpPercent > 0.5f -> TOOLTIP_HP_HIGH
-            data.hpPercent > 0.25f -> TOOLTIP_HP_MED
-            else -> TOOLTIP_HP_LOW
-        }
-        val hpText = if (data.isKO) "HP: KO'd" else "HP: ${(data.hpPercent * 100).toInt()}%"
-        lines.add(listOf(hpText to hpColor))
-
-        // Status condition
-        data.statusCondition?.let { status ->
-            val statusName = getStatusDisplayName(status)
-            lines.add(listOf("Status: $statusName" to getStatusTextColor(status)))
-        }
-
-        // Moves (with PP - exact for player, estimated range for opponent)
-        if (data.moves.isNotEmpty()) {
-            lines.add(listOf("Moves:" to TOOLTIP_LABEL))
-            for (move in data.moves.take(4)) {
-                val moveSegments = mutableListOf<Pair<String, Int>>()
-
-                // Look up move type for coloring (try lowercase registry name)
-                val moveTemplate = Moves.getByName(move.name.lowercase().replace(" ", ""))
-                    ?: Moves.getByName(move.name.lowercase())
-                val moveColor = moveTemplate?.let { UIUtils.getTypeColor(it.elementalType) } ?: TOOLTIP_TEXT
-                moveSegments.add("  ${move.name}" to moveColor)
-
-                if (data.isPlayerPokemon) {
-                    // Player's Pokemon: show exact remaining PP / max PP with color
-                    if (move.currentPp != null && move.maxPp != null) {
-                        val ppRatio = move.currentPp.toFloat() / move.maxPp.coerceAtLeast(1)
-                        val ppColor = if (ppRatio <= 0.25f) TOOLTIP_PP_LOW else TOOLTIP_PP
-                        moveSegments.add(" (" to TOOLTIP_DIM)
-                        moveSegments.add("${move.currentPp}/${move.maxPp}" to ppColor)
-                        moveSegments.add(")" to TOOLTIP_DIM)
-                    }
-                } else {
-                    // Opponent: show estimated remaining/max PP
-                    if (move.estimatedRemaining != null && move.estimatedMax != null) {
-                        val ppRatio = move.estimatedRemaining.toFloat() / move.estimatedMax.coerceAtLeast(1)
-                        val ppColor = if (ppRatio <= 0.25f) TOOLTIP_PP_LOW else TOOLTIP_PP
-                        moveSegments.add(" (~" to TOOLTIP_DIM)
-                        moveSegments.add("${move.estimatedRemaining}/${move.estimatedMax}" to ppColor)
-                        moveSegments.add(")" to TOOLTIP_DIM)
-                    } else if (move.usageCount != null) {
-                        // Unknown move - show usage count
-                        moveSegments.add(" (used ×${move.usageCount})" to TOOLTIP_DIM)
-                    }
-                }
-                lines.add(moveSegments)
-            }
-        }
-
-        // Item
-        data.item?.let { item ->
-            val itemText = when (item.status) {
-                BattleStateTracker.ItemStatus.HELD -> "Item: ${item.name}"
-                BattleStateTracker.ItemStatus.KNOCKED_OFF -> "Item: ${item.name} (knocked off)"
-                BattleStateTracker.ItemStatus.STOLEN -> "Item: ${item.name} (stolen)"
-                BattleStateTracker.ItemStatus.SWAPPED -> "Item: ${item.name} (swapped)"
-                BattleStateTracker.ItemStatus.CONSUMED -> "Item: ${item.name} (used)"
-            }
-            val itemColor = if (item.status == BattleStateTracker.ItemStatus.HELD) TOOLTIP_TEXT else TOOLTIP_LABEL
-            lines.add(listOf(itemText to itemColor))
-        }
-
-        // Stat changes - hide for player Pokemon when showStatRanges is enabled
-        // since the detailed stat lines already show this info with the base → effective format
-        val hideStatChangesLine = data.isPlayerPokemon && PanelConfig.showStatRanges
-        if (data.statChanges.isNotEmpty() && !hideStatChangesLine) {
-            val statSegments = mutableListOf<Pair<String, Int>>()
-            statSegments.add("Stats: " to TOOLTIP_LABEL)
-            val sortedStats = data.statChanges.entries.sortedBy { it.key.ordinal }
-            sortedStats.forEachIndexed { index, (stat, value) ->
-                if (index > 0) statSegments.add(" " to TOOLTIP_LABEL)
-                val sign = if (value > 0) "+" else ""
-                val statColor = if (value > 0) TOOLTIP_STAT_BOOST else TOOLTIP_STAT_DROP
-                statSegments.add("${stat.abbr}$sign$value" to statColor)
-            }
-            lines.add(statSegments)
-        }
-
-        // Stat values (Attack, Defense, Sp. Atk, Sp. Def) - only show if enabled in settings
-        if (PanelConfig.showStatRanges) {
-            // Attack
-            if (data.isPlayerPokemon && data.actualAttack != null) {
-                val attackStage = data.statChanges[BattleStateTracker.BattleStat.ATTACK] ?: 0
-                val itemName = data.item?.name
-                val itemConsumed = data.item?.status != BattleStateTracker.ItemStatus.HELD
-                val itemMultiplier = if (!itemConsumed) getItemAttackMultiplier(itemName, data.speciesName) else 1.0
-                val baseStat = data.actualAttack
-                val effectiveAttack = (applyStageMultiplier(baseStat, attackStage) * itemMultiplier).toInt()
-                val modifiers = mutableListOf<String>()
-                if (attackStage != 0) modifiers.add(if (attackStage > 0) "+$attackStage" else "$attackStage")
-                if (itemMultiplier != 1.0 && itemName != null) modifiers.add(itemName)
-                val statText = if (modifiers.isNotEmpty()) "$baseStat → $effectiveAttack" else "$effectiveAttack"
-                val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
-                lines.add(listOf("Attack: $statText$modText" to TOOLTIP_ATTACK))
-            }
-
-            // Defense
-            if (data.isPlayerPokemon && data.actualDefence != null) {
-                val defenceStage = data.statChanges[BattleStateTracker.BattleStat.DEFENSE] ?: 0
-                val itemName = data.item?.name
-                val itemConsumed = data.item?.status != BattleStateTracker.ItemStatus.HELD
-                val canEvolve = canPokemonEvolve(data.pokemonId)
-                val itemMultiplier = if (!itemConsumed) getItemDefenseMultiplier(itemName, canEvolve) else 1.0
-                val baseStat = data.actualDefence
-                val effectiveDefence = (applyStageMultiplier(baseStat, defenceStage) * itemMultiplier).toInt()
-                val modifiers = mutableListOf<String>()
-                if (defenceStage != 0) {
-                    modifiers.add(if (defenceStage > 0) "+$defenceStage" else "$defenceStage")
-                }
-                if (itemMultiplier != 1.0 && itemName != null) modifiers.add(itemName)
-                val statText = if (modifiers.isNotEmpty()) "$baseStat → $effectiveDefence" else "$effectiveDefence"
-                val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
-                lines.add(listOf("Defense: $statText$modText" to TOOLTIP_DEFENSE))
-            }
-
-            // Special Attack
-            if (data.isPlayerPokemon && data.actualSpecialAttack != null) {
-                val specialAttackStage = data.statChanges[BattleStateTracker.BattleStat.SPECIAL_ATTACK] ?: 0
-                val itemName = data.item?.name
-                val itemConsumed = data.item?.status != BattleStateTracker.ItemStatus.HELD
-                val itemMultiplier = if (!itemConsumed) getItemSpecialAttackMultiplier(itemName, data.speciesName) else 1.0
-                val baseStat = data.actualSpecialAttack
-                val effectiveSpecialAttack = (applyStageMultiplier(baseStat, specialAttackStage) * itemMultiplier).toInt()
-                val modifiers = mutableListOf<String>()
-                if (specialAttackStage != 0) modifiers.add(if (specialAttackStage > 0) "+$specialAttackStage" else "$specialAttackStage")
-                if (itemMultiplier != 1.0 && itemName != null) modifiers.add(itemName)
-                val statText = if (modifiers.isNotEmpty()) "$baseStat → $effectiveSpecialAttack" else "$effectiveSpecialAttack"
-                val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
-                lines.add(listOf("Sp. Atk: $statText$modText" to TOOLTIP_SPECIAL_ATTACK))
-            }
-
-            // Special Defense
-            if (data.isPlayerPokemon && data.actualSpecialDefence != null) {
-                val specialDefenceStage = data.statChanges[BattleStateTracker.BattleStat.SPECIAL_DEFENSE] ?: 0
-                val itemName = data.item?.name
-                val itemConsumed = data.item?.status != BattleStateTracker.ItemStatus.HELD
-                val canEvolve = canPokemonEvolve(data.pokemonId)
-                val itemMultiplier = if (!itemConsumed) getItemSpecialDefenseMultiplier(itemName, data.speciesName, canEvolve) else 1.0
-                val baseStat = data.actualSpecialDefence
-                val effectiveSpecialDefence = (applyStageMultiplier(baseStat, specialDefenceStage) * itemMultiplier).toInt()
-                val modifiers = mutableListOf<String>()
-                if (specialDefenceStage != 0) {
-                    modifiers.add(if (specialDefenceStage > 0) "+$specialDefenceStage" else "$specialDefenceStage")
-                }
-                if (itemMultiplier != 1.0 && itemName != null) modifiers.add(itemName)
-                val statText = if (modifiers.isNotEmpty()) "$baseStat → $effectiveSpecialDefence" else "$effectiveSpecialDefence"
-                val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
-                lines.add(listOf("Sp. Def: $statText$modText" to TOOLTIP_SPECIAL_DEFENSE))
-            }
-        }
-
-        // Speed tier display with ability/status/item modifiers (always shown)
-        val speedStage = data.statChanges[BattleStateTracker.BattleStat.SPEED] ?: 0
-        if (data.isPlayerPokemon && data.actualSpeed != null) {
-            // Player's Pokemon: show effective speed with all modifiers
-            val itemName = data.item?.name
-            val itemConsumed = data.item?.status != BattleStateTracker.ItemStatus.HELD
-            val baseStat = data.actualSpeed
-            val effectiveSpeed = calculateEffectiveSpeed(
-                baseStat, speedStage, data.abilityName,
-                data.statusCondition, itemName, itemConsumed
-            )
-            // Build modifier notes
-            val modifiers = mutableListOf<String>()
-            if (speedStage != 0) modifiers.add(if (speedStage > 0) "+$speedStage" else "$speedStage")
-            val abilityMult = getAbilitySpeedMultiplier(
-                data.abilityName, BattleStateTracker.weather?.type, BattleStateTracker.terrain?.type,
-                data.statusCondition != null, itemConsumed
-            )
-            if (abilityMult != 1.0) modifiers.add("${data.abilityName}")
-            if (data.statusCondition == Statuses.PARALYSIS && normalizeAbilityName(data.abilityName) != "quickfeet") {
-                modifiers.add("Para")
-            }
-            if (itemName != null && getItemSpeedMultiplier(itemName) != 1.0 && !itemConsumed) {
-                modifiers.add(itemName)
-            }
-            val statText = if (modifiers.isNotEmpty()) "$baseStat → $effectiveSpeed" else "$effectiveSpeed"
-            val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
-            lines.add(listOf("Speed: $statText$modText" to TOOLTIP_SPEED))
-        } else if (data.pokemonId != null && data.level != null) {
-            // Opponent: show min-max speed range with ability considerations
-            val speedRange = calculateOpponentSpeedRange(
-                data.uuid, data.pokemonId, data.level, speedStage, data.statusCondition, data.item, data.form
-            )
-            if (speedRange != null) {
-                val modifiers = mutableListOf<String>()
-                if (speedStage != 0) modifiers.add(if (speedStage > 0) "+$speedStage" else "$speedStage")
-                speedRange.abilityNote?.let { modifiers.add(it) }
-                speedRange.itemNote?.let { modifiers.add(it) }
-                if (data.statusCondition == Statuses.PARALYSIS) modifiers.add("Para?")
-                val modText = if (modifiers.isNotEmpty()) " (${modifiers.joinToString(", ")})" else ""
-                lines.add(listOf("Speed: ${speedRange.minSpeed}-${speedRange.maxSpeed}$modText" to TOOLTIP_SPEED))
-            }
-        }
-
-        // Volatile statuses
-        if (data.volatileStatuses.isNotEmpty()) {
-            val volatileText = data.volatileStatuses.take(3).joinToString(", ") { it.type.displayName }
-            val suffix = if (data.volatileStatuses.size > 3) "..." else ""
-            lines.add(listOf("Effects: $volatileText$suffix" to TOOLTIP_LABEL))
-        }
-
-        // Calculate dimensions - sum up segment widths for each line
-        val maxLineWidth = lines.maxOfOrNull { segments ->
-            segments.sumOf { (text, _) -> (textRenderer.getWidth(text) * fontScale).toInt() }
-        } ?: 80
-        val tooltipWidth = maxLineWidth + TOOLTIP_PADDING * 2
-        val tooltipHeight = lines.size * lineHeight + TOOLTIP_PADDING * 2
-
-        // Position tooltip below the pokeball (centered)
-        var tooltipX = bounds.x + (bounds.width / 2) - (tooltipWidth / 2)
-        var tooltipY = bounds.y + bounds.height + 4
-
-        // Clamp to screen bounds
-        tooltipX = tooltipX.coerceIn(4, screenWidth - tooltipWidth - 4)
-        if (tooltipY + tooltipHeight > screenHeight - 4) {
-            // Show above pokeball if not enough space below
-            tooltipY = bounds.y - tooltipHeight - 4
-        }
-        tooltipY = tooltipY.coerceAtLeast(4)
+        val result = PokemonInfoPopup.render(
+            context, bounds, data, screenWidth, screenHeight, isMinimised
+        )
 
         // Store tooltip bounds for input handling
-        tooltipBounds = TooltipBoundsData(tooltipX, tooltipY, tooltipWidth, tooltipHeight)
-
-        // Push z-level forward so tooltip renders on top of other UI elements
-        val matrices = context.matrices
-        matrices.push()
-        matrices.translate(0.0, 0.0, 400.0)
-
-        // Draw rounded background
-        drawTooltipBackground(context, tooltipX, tooltipY, tooltipWidth, tooltipHeight)
-
-        // Draw text lines with scaling (each line can have multiple colored segments)
-        var lineY = tooltipY + TOOLTIP_PADDING
-        for (segments in lines) {
-            var segmentX = (tooltipX + TOOLTIP_PADDING).toFloat()
-            for ((text, textColor) in segments) {
-                drawScaledText(
-                    context = context,
-                    text = Text.literal(text),
-                    x = segmentX,
-                    y = lineY.toFloat(),
-                    colour = applyOpacity(textColor),
-                    scale = fontScale,
-                    shadow = false
-                )
-                segmentX += textRenderer.getWidth(text) * fontScale
-            }
-            lineY += lineHeight
-        }
-
-        matrices.pop()
+        tooltipBounds = result
     }
 
     /**
@@ -3211,64 +2829,10 @@ object TeamIndicatorUI {
      * Uses the standard Pokemon formula: (2 + stage) / 2 for positive, 2 / (2 - stage) for negative.
      * Note: For player Pokemon, the input stat already includes nature from Cobblemon.
      */
-    private fun applyStageMultiplier(stat: Int, stage: Int): Int {
+    internal fun applyStageMultiplier(stat: Int, stage: Int): Int {
         val multiplier = getStageMultiplier(stage)
         return (stat * multiplier).toInt()
     }
-
-    /**
-     * Draw a rounded tooltip background with border.
-     */
-    private fun drawTooltipBackground(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
-        val corner = TOOLTIP_CORNER
-
-        // Apply opacity for minimized state
-        val bg = applyOpacity(TOOLTIP_BG)
-        val border = applyOpacity(TOOLTIP_BORDER)
-
-        // Draw main background (cross pattern for rounded corners)
-        context.fill(x + corner, y, x + width - corner, y + height, bg)
-        context.fill(x, y + corner, x + width, y + height - corner, bg)
-
-        // Fill corners with graduated rounding
-        // Top-left corner
-        context.fill(x + 2, y + 1, x + corner, y + 2, bg)
-        context.fill(x + 1, y + 2, x + corner, y + corner, bg)
-        // Top-right corner
-        context.fill(x + width - corner, y + 1, x + width - 2, y + 2, bg)
-        context.fill(x + width - corner, y + 2, x + width - 1, y + corner, bg)
-        // Bottom-left corner
-        context.fill(x + 2, y + height - 2, x + corner, y + height - 1, bg)
-        context.fill(x + 1, y + height - corner, x + corner, y + height - 2, bg)
-        // Bottom-right corner
-        context.fill(x + width - corner, y + height - 2, x + width - 2, y + height - 1, bg)
-        context.fill(x + width - corner, y + height - corner, x + width - 1, y + height - 2, bg)
-
-        // Draw border - straight edges
-        context.fill(x + corner, y, x + width - corner, y + 1, border)
-        context.fill(x + corner, y + height - 1, x + width - corner, y + height, border)
-        context.fill(x, y + corner, x + 1, y + height - corner, border)
-        context.fill(x + width - 1, y + corner, x + width, y + height - corner, border)
-
-        // Draw rounded corner borders
-        // Top-left
-        context.fill(x + 2, y, x + corner, y + 1, border)
-        context.fill(x + 1, y + 1, x + 2, y + 2, border)
-        context.fill(x, y + 2, x + 1, y + corner, border)
-        // Top-right
-        context.fill(x + width - corner, y, x + width - 2, y + 1, border)
-        context.fill(x + width - 2, y + 1, x + width - 1, y + 2, border)
-        context.fill(x + width - 1, y + 2, x + width, y + corner, border)
-        // Bottom-left
-        context.fill(x + 2, y + height - 1, x + corner, y + height, border)
-        context.fill(x + 1, y + height - 2, x + 2, y + height - 1, border)
-        context.fill(x, y + height - corner, x + 1, y + height - 2, border)
-        // Bottom-right
-        context.fill(x + width - corner, y + height - 1, x + width - 2, y + height, border)
-        context.fill(x + width - 2, y + height - 2, x + width - 1, y + height - 1, border)
-        context.fill(x + width - 1, y + height - corner, x + width, y + height - 2, border)
-    }
-
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Tooltip Input Handling
@@ -3280,7 +2844,7 @@ object TeamIndicatorUI {
     private fun handleFontKeybinds(handle: Long) {
         val increaseKey =
             InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.increaseFontKey.boundKeyTranslationKey)
-        val isIncreaseDown = isKeyOrButtonPressed(handle, increaseKey)
+        val isIncreaseDown = UIUtils.isKeyOrButtonPressed(handle, increaseKey)
         if (isIncreaseDown && !wasIncreaseFontKeyPressed) {
             PanelConfig.adjustTooltipFontScale(PanelConfig.FONT_SCALE_STEP)
             PanelConfig.save()
@@ -3289,19 +2853,12 @@ object TeamIndicatorUI {
 
         val decreaseKey =
             InputUtil.fromTranslationKey(CobblemonExtendedBattleUIClient.decreaseFontKey.boundKeyTranslationKey)
-        val isDecreaseDown = isKeyOrButtonPressed(handle, decreaseKey)
+        val isDecreaseDown = UIUtils.isKeyOrButtonPressed(handle, decreaseKey)
         if (isDecreaseDown && !wasDecreaseFontKeyPressed) {
             PanelConfig.adjustTooltipFontScale(-PanelConfig.FONT_SCALE_STEP)
             PanelConfig.save()
         }
         wasDecreaseFontKeyPressed = isDecreaseDown
-    }
-
-    private fun isKeyOrButtonPressed(handle: Long, key: InputUtil.Key): Boolean {
-        return when (key.category) {
-            InputUtil.Type.MOUSE -> GLFW.glfwGetMouseButton(handle, key.code) == GLFW.GLFW_PRESS
-            else -> GLFW.glfwGetKey(handle, key.code) == GLFW.GLFW_PRESS
-        }
     }
 
     /**
@@ -3335,19 +2892,19 @@ object TeamIndicatorUI {
         return false
     }
 
-    private fun getStatusDisplayName(status: Status): String {
+    internal fun getStatusDisplayName(status: Status): String {
         return when (status) {
-            Statuses.POISON -> "Poisoned"
-            Statuses.POISON_BADLY -> "Badly Poisoned"
-            Statuses.BURN -> "Burned"
-            Statuses.PARALYSIS -> "Paralyzed"
-            Statuses.FROZEN -> "Frozen"
-            Statuses.SLEEP -> "Asleep"
+            Statuses.POISON -> Text.translatable("cobblemonextendedbattleui.status.poisoned").string
+            Statuses.POISON_BADLY -> Text.translatable("cobblemonextendedbattleui.status.badly_poisoned").string
+            Statuses.BURN -> Text.translatable("cobblemonextendedbattleui.status.burned").string
+            Statuses.PARALYSIS -> Text.translatable("cobblemonextendedbattleui.status.paralyzed").string
+            Statuses.FROZEN -> Text.translatable("cobblemonextendedbattleui.status.frozen").string
+            Statuses.SLEEP -> Text.translatable("cobblemonextendedbattleui.status.asleep").string
             else -> status.name.path.replaceFirstChar { it.uppercase() }
         }
     }
 
-    private fun getStatusTextColor(status: Status): Int {
+    internal fun getStatusTextColor(status: Status): Int {
         return when (status) {
             Statuses.POISON, Statuses.POISON_BADLY -> color(160, 90, 200)
             Statuses.BURN -> color(255, 140, 50)

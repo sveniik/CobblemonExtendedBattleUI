@@ -281,7 +281,37 @@ object BattleStateTracker {
             return
         }
 
-        val existing = dynamicTypes[uuid] ?: return
+        // If types aren't tracked yet, initialize from species data
+        var existing = dynamicTypes[uuid]
+        if (existing == null) {
+            val speciesId = pokemonSpeciesIds[uuid]
+            val species = speciesId?.let { PokemonSpecies.getByIdentifier(it) }
+            if (species != null) {
+                val primaryType = species.primaryType.name
+                val secondaryType = species.secondaryType?.name
+                existing = DynamicTypeState(
+                    primaryType = primaryType,
+                    secondaryType = secondaryType,
+                    hasLostPrimaryType = false,
+                    originalPrimaryType = primaryType,
+                    originalSecondaryType = secondaryType
+                )
+            } else {
+                // No species data — create minimal state so the added type still shows
+                existing = DynamicTypeState(
+                    primaryType = null,
+                    secondaryType = null,
+                    hasLostPrimaryType = false,
+                    originalPrimaryType = null,
+                    originalSecondaryType = null
+                )
+            }
+            dynamicTypes[uuid] = existing
+            CobblemonExtendedBattleUI.LOGGER.debug(
+                "BattleStateTracker: Initialized types for $pokemonName: ${existing.primaryType}/${existing.secondaryType}"
+            )
+        }
+
         val normalizedName = typeName.replaceFirstChar { it.uppercase() }
 
         // Don't add if already present in normal types or added types

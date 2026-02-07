@@ -152,7 +152,34 @@ Copy this file and translate the values on the right side of each colon:
   "cobblemonextendedbattleui.ui.effect": "effect",
   "cobblemonextendedbattleui.ui.effects": "effects",
   "cobblemonextendedbattleui.ui.pokemon_count.singular": "Pokémon",
-  "cobblemonextendedbattleui.ui.pokemon_count.plural": "Pokémon"
+  "cobblemonextendedbattleui.ui.pokemon_count.plural": "Pokémon",
+
+  "cobblemonextendedbattleui.popup.level": "Lv.%s",
+  "cobblemonextendedbattleui.popup.hp": "HP: %s%%",
+  "cobblemonextendedbattleui.popup.ko": "KO",
+  "cobblemonextendedbattleui.popup.tera_prefix": "Tera ",
+  "cobblemonextendedbattleui.popup.tera_label": "Tera: %s",
+
+  "cobblemonextendedbattleui.item.knocked_off": "(off)",
+  "cobblemonextendedbattleui.item.stolen": "(stolen)",
+  "cobblemonextendedbattleui.item.swapped": "(swap)",
+  "cobblemonextendedbattleui.item.consumed": "(used)",
+
+  "cobblemonextendedbattleui.status.poisoned": "Poisoned",
+  "cobblemonextendedbattleui.status.badly_poisoned": "Badly Poisoned",
+  "cobblemonextendedbattleui.status.burned": "Burned",
+  "cobblemonextendedbattleui.status.paralyzed": "Paralyzed",
+  "cobblemonextendedbattleui.status.frozen": "Frozen",
+  "cobblemonextendedbattleui.status.asleep": "Asleep",
+
+  "cobblemonextendedbattleui.effectiveness.immune": "Immune (0x)",
+  "cobblemonextendedbattleui.effectiveness.extremely_ineffective": "Extremely Ineffective (%sx)",
+  "cobblemonextendedbattleui.effectiveness.not_effective": "Not effective (%sx)",
+  "cobblemonextendedbattleui.effectiveness.not_very_effective": "Not very effective (%sx)",
+  "cobblemonextendedbattleui.effectiveness.extremely_effective": "Extremely Effective! (%sx)",
+  "cobblemonextendedbattleui.effectiveness.super_effective": "Super effective! (%sx)",
+  "cobblemonextendedbattleui.effectiveness.neutral": "Normal damage (1x)",
+  "cobblemonextendedbattleui.effectiveness.vs": "vs %1$s: %2$s"
 }
 ```
 

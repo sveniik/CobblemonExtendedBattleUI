@@ -6,7 +6,7 @@ A client-side Fabric mod that adds helpful information displays to Cobblemon bat
 
 During Cobblemon battles, this mod shows you information that's normally hard to track:
 
-![Full Showcase](https://cdn.modrinth.com/data/cached_images/4874356335b16b6a3e608e102fefef72704362d7.png)
+![Full Showcase](https://github.com/user-attachments/assets/cb8c27df-966d-4ce2-9db4-5ba714921f64)
 
 ### Battle Info Panel
 
@@ -21,11 +21,11 @@ A panel on your screen that displays:
 
 The panel shows turn ranges like "5-8" when we don't know if the opponent has items that extend duration (like Light Clay for screens or weather rocks).
 
-![Battle Info Panel](https://cdn.modrinth.com/data/cached_images/13a0c887394fefc67ae8bc0c02cff379ee14c3fe_0.webp)
+![Battle Info Panel](https://github.com/user-attachments/assets/64772db2-5628-40c9-9614-acc1c691b274)
 
 This panel is also fully resizable, moveable, and collapsible if you only want to see a quick glance of relevant information!
 
-![Collapsed Panel](https://cdn.modrinth.com/data/cached_images/4c33d13050ade1bfd72ca63aa32103761bd01ce8.png)
+![Collapsed Panel](https://github.com/user-attachments/assets/5d34fb73-f0e7-405f-ab55-f2767e8e9baa)
 
 ### Battle Log
 
@@ -52,7 +52,12 @@ Pokemon model indicators below each team's health bars showing:
 - **Status Tracking** - Status conditions shown via color tinting on models
 - **KO Tracking** - Fainted Pokemon appear grayed out
 
-![Team Indicators](https://cdn.modrinth.com/data/cached_images/c7a572a02b91b4e6a5c5cfbd8b50d0b74a2719ac.png)
+![Team Indicators](https://github.com/user-attachments/assets/904daa33-86bb-4225-b2b1-9c4f49e6ef2b)
+
+The data in the tooltips will only display what you know with certainty for an opponent, and will update as more information is revealed. For example, in the following screenshot the opposing Porygon-Z has used Shadow Ball once, and we could see the recoil from Life Orb, but we have no idea what it's Ability, remaining moves, or Speed is exactly:
+
+<img width="636" height="713" alt="Screenshot 2026-02-07 161138" src="https://github.com/user-attachments/assets/0de5ea49-6138-47c6-a316-76c6b774c188" />
+
 
 ### Move Tooltips
 
@@ -62,7 +67,7 @@ When selecting a move in battle, hover over any move to see:
 - **Move Stats** - Power, accuracy, PP remaining
 - **Move Category** - Physical, special, or status
 
-![Move Tooltip](https://cdn.modrinth.com/data/cached_images/1cfcdb1ed6c62692a3804ecf5f6247ef70202899.png)
+![Move Tooltip](https://github.com/user-attachments/assets/848c6817-763e-4743-9035-0e576f9a3aaf)
 
 This feature can be disabled if you prefer to use [Cobblemon Move Inspector](https://modrinth.com/mod/cobblemon-move-inspector) instead.
 

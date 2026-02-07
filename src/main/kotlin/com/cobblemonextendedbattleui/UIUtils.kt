@@ -2,6 +2,7 @@ package com.cobblemonextendedbattleui
 
 import com.cobblemon.mod.common.api.types.ElementalType
 import com.cobblemon.mod.common.client.render.drawScaledText
+import com.cobblemonextendedbattleui.ui.shared.NineSliceRenderer
 import com.mojang.blaze3d.systems.RenderSystem
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
@@ -395,45 +396,19 @@ object UIUtils {
     val CELL_BORDER = color(50, 58, 72)
     val ROW_DIVIDER_COLOR = color(38, 45, 58)
 
+    /** Shared 9-slice insets for the popup frame texture. */
+    val POPUP_FRAME_INSETS = NineSliceRenderer.SliceInsets(POPUP_SLICE)
+
     /**
      * Renders a 9-slice frame using the shared popup_frame.png texture.
      */
     fun renderPopupFrame(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
-        val tex = POPUP_FRAME_TEXTURE
-        val s = POPUP_SLICE
-        val centerTexW = POPUP_TEX_W - s * 2
-        val centerTexH = POPUP_TEX_H - s * 2
-        val centerW = width - s * 2
-        val centerH = height - s * 2
-
-        // Corners
-        context.drawTexture(tex, x, y, s, s, 0f, 0f, s, s, POPUP_TEX_W, POPUP_TEX_H)
-        context.drawTexture(tex, x + width - s, y, s, s,
-            (POPUP_TEX_W - s).toFloat(), 0f, s, s, POPUP_TEX_W, POPUP_TEX_H)
-        context.drawTexture(tex, x, y + height - s, s, s,
-            0f, (POPUP_TEX_H - s).toFloat(), s, s, POPUP_TEX_W, POPUP_TEX_H)
-        context.drawTexture(tex, x + width - s, y + height - s, s, s,
-            (POPUP_TEX_W - s).toFloat(), (POPUP_TEX_H - s).toFloat(), s, s, POPUP_TEX_W, POPUP_TEX_H)
-
-        // Edges
-        if (centerW > 0) {
-            context.drawTexture(tex, x + s, y, centerW, s,
-                s.toFloat(), 0f, centerTexW, s, POPUP_TEX_W, POPUP_TEX_H)
-            context.drawTexture(tex, x + s, y + height - s, centerW, s,
-                s.toFloat(), (POPUP_TEX_H - s).toFloat(), centerTexW, s, POPUP_TEX_W, POPUP_TEX_H)
-        }
-        if (centerH > 0) {
-            context.drawTexture(tex, x, y + s, s, centerH,
-                0f, s.toFloat(), s, centerTexH, POPUP_TEX_W, POPUP_TEX_H)
-            context.drawTexture(tex, x + width - s, y + s, s, centerH,
-                (POPUP_TEX_W - s).toFloat(), s.toFloat(), s, centerTexH, POPUP_TEX_W, POPUP_TEX_H)
-        }
-
-        // Center
-        if (centerW > 0 && centerH > 0) {
-            context.drawTexture(tex, x + s, y + s, centerW, centerH,
-                s.toFloat(), s.toFloat(), centerTexW, centerTexH, POPUP_TEX_W, POPUP_TEX_H)
-        }
+        NineSliceRenderer.render(
+            context, POPUP_FRAME_TEXTURE,
+            x, y, width, height,
+            POPUP_TEX_W, POPUP_TEX_H,
+            POPUP_FRAME_INSETS
+        )
     }
 
     /**

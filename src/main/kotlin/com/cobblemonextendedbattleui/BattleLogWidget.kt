@@ -3,6 +3,9 @@ package com.cobblemonextendedbattleui
 import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.render.drawScaledText
 import com.cobblemon.mod.common.util.cobblemonResource
+import com.cobblemonextendedbattleui.ui.shared.NineSliceRenderer
+import com.cobblemonextendedbattleui.ui.shared.ScrollbarRenderer
+import com.cobblemonextendedbattleui.ui.shared.WidgetInteractionHandler
 import com.mojang.blaze3d.systems.RenderSystem
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
@@ -26,22 +29,17 @@ import org.lwjgl.glfw.GLFW
 object BattleLogWidget {
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // Cobblemon textures
+    // Cobblemon textures & 9-slice config
     // ═══════════════════════════════════════════════════════════════════════════
 
     private val FRAME_TEXTURE: Identifier = cobblemonResource("textures/gui/battle/battle_log.png")
     private val FRAME_EXPANDED_TEXTURE: Identifier = cobblemonResource("textures/gui/battle/battle_log_expanded.png")
 
-    // Original texture dimensions
     private const val TEXTURE_WIDTH = 169
     private const val TEXTURE_HEIGHT_COLLAPSED = 55
     private const val TEXTURE_HEIGHT_EXPANDED = 101
 
-    // 9-slice border sizes (how much of the texture edges to preserve)
-    private const val SLICE_LEFT = 6
-    private const val SLICE_RIGHT = 6
-    private const val SLICE_TOP = 6
-    private const val SLICE_BOTTOM = 6
+    private val SLICE_INSETS = NineSliceRenderer.SliceInsets(6)
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Layout constants
@@ -106,35 +104,16 @@ object BattleLogWidget {
     private var wasIncreaseFontKeyPressed: Boolean = false
     private var wasDecreaseFontKeyPressed: Boolean = false
 
-    // Dragging state
-    private var isDragging: Boolean = false
-    private var dragOffsetX: Int = 0
-    private var dragOffsetY: Int = 0
+    // Shared interaction handler for drag/resize/scrollbar
+    private val interaction = WidgetInteractionHandler(UIUtils.ActivePanel.BATTLE_LOG)
 
-    // Resize state
-    private var isResizing: Boolean = false
-    private var resizeZone: UIUtils.ResizeZone = UIUtils.ResizeZone.NONE
-    private var resizeStartX: Int = 0
-    private var resizeStartY: Int = 0
-    private var resizeStartWidth: Int = 0
-    private var resizeStartHeight: Int = 0
-    private var resizeStartPanelX: Int = 0
-    private var resizeStartPanelY: Int = 0
-
-    // Scrollbar drag state
-    private var isDraggingScrollbar: Boolean = false
-    private var scrollbarDragStartY: Int = 0
-    private var scrollbarDragStartOffset: Int = 0
-
-    // Scrollbar bounds (updated during render)
-    private var scrollbarX: Int = 0
-    private var scrollbarY: Int = 0
-    private var scrollbarHeight: Int = 0
-    private var scrollbarThumbY: Int = 0
-    private var scrollbarThumbHeight: Int = 0
-
-    // Hover state
-    private var hoveredZone: UIUtils.ResizeZone = UIUtils.ResizeZone.NONE
+    // Shared scrollbar renderer
+    private val scrollbar = ScrollbarRenderer(
+        trackWidth = SCROLLBAR_WIDTH,
+        bgColor = SCROLLBAR_BG,
+        thumbColor = SCROLLBAR_THUMB,
+        opacityProvider = { { c: Int -> applyOpacity(c) } }
+    )
 
     // Bounds for click detection
     private var widgetX: Int = 0
@@ -225,7 +204,7 @@ object BattleLogWidget {
         renderContent(context, x, y, width, height)
 
         // Resize handles only when expanded and not minimized (minimized = read-only)
-        if (!isMinimised && isExpanded && (hoveredZone != UIUtils.ResizeZone.NONE || isResizing)) {
+        if (!isMinimised && isExpanded && (interaction.hoveredZone != UIUtils.ResizeZone.NONE || interaction.isResizing)) {
             renderResizeHandles(context, x, y, width, height)
         }
 
@@ -284,123 +263,18 @@ object BattleLogWidget {
 
     /**
      * Renders the frame using 9-slice technique with Cobblemon's textures.
-     * This allows the texture to be stretched to any size while preserving
-     * the corners and edges properly.
-     *
-     * Uses DrawContext.drawTexture which properly stretches (not tiles) when
-     * render size differs from source region size.
+     * Delegates to the shared NineSliceRenderer.
      */
     private fun renderFrame9Slice(context: DrawContext, x: Int, y: Int, width: Int, height: Int, isExpanded: Boolean) {
         val texture = if (isExpanded) FRAME_EXPANDED_TEXTURE else FRAME_TEXTURE
         val texH = if (isExpanded) TEXTURE_HEIGHT_EXPANDED else TEXTURE_HEIGHT_COLLAPSED
 
-        // Calculate the sizes of the center regions in the texture
-        val centerTexW = TEXTURE_WIDTH - SLICE_LEFT - SLICE_RIGHT
-        val centerTexH = texH - SLICE_TOP - SLICE_BOTTOM
-
-        // Calculate the sizes of the center regions in the render
-        val centerW = width - SLICE_LEFT - SLICE_RIGHT
-        val centerH = height - SLICE_TOP - SLICE_BOTTOM
-
-        // Top-left corner (no stretching needed)
-        context.drawTexture(
-            texture,
-            x, y,                           // render position
-            SLICE_LEFT, SLICE_TOP,          // render size
-            0f, 0f,                         // UV offset
-            SLICE_LEFT, SLICE_TOP,          // source region size
-            TEXTURE_WIDTH, texH             // full texture size
+        NineSliceRenderer.render(
+            context, texture,
+            x, y, width, height,
+            TEXTURE_WIDTH, texH,
+            SLICE_INSETS
         )
-
-        // Top-right corner
-        context.drawTexture(
-            texture,
-            x + width - SLICE_RIGHT, y,
-            SLICE_RIGHT, SLICE_TOP,
-            (TEXTURE_WIDTH - SLICE_RIGHT).toFloat(), 0f,
-            SLICE_RIGHT, SLICE_TOP,
-            TEXTURE_WIDTH, texH
-        )
-
-        // Bottom-left corner
-        context.drawTexture(
-            texture,
-            x, y + height - SLICE_BOTTOM,
-            SLICE_LEFT, SLICE_BOTTOM,
-            0f, (texH - SLICE_BOTTOM).toFloat(),
-            SLICE_LEFT, SLICE_BOTTOM,
-            TEXTURE_WIDTH, texH
-        )
-
-        // Bottom-right corner
-        context.drawTexture(
-            texture,
-            x + width - SLICE_RIGHT, y + height - SLICE_BOTTOM,
-            SLICE_RIGHT, SLICE_BOTTOM,
-            (TEXTURE_WIDTH - SLICE_RIGHT).toFloat(), (texH - SLICE_BOTTOM).toFloat(),
-            SLICE_RIGHT, SLICE_BOTTOM,
-            TEXTURE_WIDTH, texH
-        )
-
-        // Top edge (stretched horizontally)
-        if (centerW > 0) {
-            context.drawTexture(
-                texture,
-                x + SLICE_LEFT, y,              // render position
-                centerW, SLICE_TOP,             // render size (stretched width)
-                SLICE_LEFT.toFloat(), 0f,       // UV offset
-                centerTexW, SLICE_TOP,          // source region size
-                TEXTURE_WIDTH, texH
-            )
-        }
-
-        // Bottom edge (stretched horizontally)
-        if (centerW > 0) {
-            context.drawTexture(
-                texture,
-                x + SLICE_LEFT, y + height - SLICE_BOTTOM,
-                centerW, SLICE_BOTTOM,
-                SLICE_LEFT.toFloat(), (texH - SLICE_BOTTOM).toFloat(),
-                centerTexW, SLICE_BOTTOM,
-                TEXTURE_WIDTH, texH
-            )
-        }
-
-        // Left edge (stretched vertically)
-        if (centerH > 0) {
-            context.drawTexture(
-                texture,
-                x, y + SLICE_TOP,
-                SLICE_LEFT, centerH,            // render size (stretched height)
-                0f, SLICE_TOP.toFloat(),
-                SLICE_LEFT, centerTexH,         // source region size
-                TEXTURE_WIDTH, texH
-            )
-        }
-
-        // Right edge (stretched vertically)
-        if (centerH > 0) {
-            context.drawTexture(
-                texture,
-                x + width - SLICE_RIGHT, y + SLICE_TOP,
-                SLICE_RIGHT, centerH,
-                (TEXTURE_WIDTH - SLICE_RIGHT).toFloat(), SLICE_TOP.toFloat(),
-                SLICE_RIGHT, centerTexH,
-                TEXTURE_WIDTH, texH
-            )
-        }
-
-        // Center (stretched both ways)
-        if (centerW > 0 && centerH > 0) {
-            context.drawTexture(
-                texture,
-                x + SLICE_LEFT, y + SLICE_TOP,
-                centerW, centerH,               // render size (stretched both)
-                SLICE_LEFT.toFloat(), SLICE_TOP.toFloat(),
-                centerTexW, centerTexH,         // source region size
-                TEXTURE_WIDTH, texH
-            )
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -427,10 +301,10 @@ object BattleLogWidget {
 
         // Only update hover state when this panel can interact
         val canInteract = UIUtils.canInteract(UIUtils.ActivePanel.BATTLE_LOG)
-        if (!isDragging && !isResizing && !isDraggingScrollbar && canInteract) {
-            hoveredZone = getResizeZone(mouseX, mouseY)
+        if (!interaction.isInteracting && canInteract) {
+            interaction.hoveredZone = getResizeZone(mouseX, mouseY)
         } else if (!canInteract) {
-            hoveredZone = UIUtils.ResizeZone.NONE
+            interaction.hoveredZone = UIUtils.ResizeZone.NONE
         }
 
         val isOverHeader = isOverWidget && mouseY <= headerEndY
@@ -442,103 +316,63 @@ object BattleLogWidget {
                            mouseY >= toggleZoneY && mouseY <= toggleZoneY + 12
 
         // Check if mouse is over scrollbar (use wider hit area for easier clicking)
-        val scrollbarHitWidth = SCROLLBAR_WIDTH + 6
-        val isOverScrollbar = contentHeight > visibleHeight &&
-                              mouseX >= scrollbarX - 3 && mouseX <= scrollbarX + scrollbarHitWidth &&
-                              mouseY >= scrollbarY && mouseY <= scrollbarY + scrollbarHeight
+        val isOverScrollbar = contentHeight > visibleHeight && scrollbar.isOverTrack(mouseX, mouseY)
 
         if (isMouseDown) {
             when {
                 // Continue scrollbar drag (check first to maintain drag even if mouse moves off)
-                isDraggingScrollbar -> {
-                    handleScrollbarDrag(mouseY)
+                interaction.isDraggingScrollbar -> {
+                    val deltaY = mouseY - interaction.scrollbarDragStartY
+                    scrollOffset = scrollbar.dragToScrollOffset(deltaY, interaction.scrollbarDragStartOffset, contentHeight, visibleHeight)
+                    val maxScroll = (contentHeight - visibleHeight).coerceAtLeast(0)
+                    isFollowingBottom = scrollOffset >= maxScroll - BOTTOM_THRESHOLD
                 }
                 // Toggle expand/collapse
                 !wasMousePressed && isOverToggle -> {
                     PanelConfig.setLogExpanded(!PanelConfig.logExpanded)
                     scrollOffset = 0
-                    isFollowingBottom = true  // Reset to following on toggle
+                    isFollowingBottom = true
                     PanelConfig.save()
                 }
                 // Start scrollbar drag
                 !wasMousePressed && canInteract && isOverScrollbar -> {
-                    UIUtils.claimInteraction(UIUtils.ActivePanel.BATTLE_LOG)
-                    isDraggingScrollbar = true
-                    scrollbarDragStartY = mouseY
-                    scrollbarDragStartOffset = scrollOffset
+                    interaction.startScrollbarDrag(mouseY, scrollOffset)
                     // If clicked on track (not thumb), jump to that position
-                    if (mouseY < scrollbarThumbY || mouseY > scrollbarThumbY + scrollbarThumbHeight) {
-                        // Click on track - jump thumb center to click position
-                        val trackClickRatio = (mouseY - scrollbarY).toFloat() / scrollbarHeight
-                        val maxScroll = (contentHeight - visibleHeight).coerceAtLeast(0)
-                        scrollOffset = (trackClickRatio * maxScroll).toInt().coerceIn(0, maxScroll)
-                        scrollbarDragStartY = mouseY
-                        scrollbarDragStartOffset = scrollOffset
+                    if (!scrollbar.isOverThumb(mouseX, mouseY)) {
+                        scrollOffset = scrollbar.trackClickToScrollOffset(mouseY, contentHeight, visibleHeight)
+                        interaction.startScrollbarDrag(mouseY, scrollOffset)
                     }
                     isFollowingBottom = false
                 }
                 // Start resize
-                !wasMousePressed && canInteract && hoveredZone != UIUtils.ResizeZone.NONE -> {
-                    UIUtils.claimInteraction(UIUtils.ActivePanel.BATTLE_LOG)
-                    isResizing = true
-                    resizeZone = hoveredZone
-                    resizeStartX = mouseX
-                    resizeStartY = mouseY
-                    resizeStartWidth = widgetW
-                    resizeStartHeight = widgetH
-                    resizeStartPanelX = widgetX
-                    resizeStartPanelY = widgetY
+                !wasMousePressed && canInteract && interaction.hoveredZone != UIUtils.ResizeZone.NONE -> {
+                    interaction.startResize(mouseX, mouseY, interaction.hoveredZone, widgetX, widgetY, widgetW, widgetH)
                 }
                 // Continue resizing
-                isResizing -> {
+                interaction.isResizing -> {
                     handleResize(mouseX, mouseY, screenWidth, screenHeight)
                 }
                 // Start dragging (from header, excluding toggle)
                 !wasMousePressed && canInteract && isOverHeader && !isOverToggle -> {
-                    UIUtils.claimInteraction(UIUtils.ActivePanel.BATTLE_LOG)
-                    isDragging = true
-                    dragOffsetX = mouseX - widgetX
-                    dragOffsetY = mouseY - widgetY
+                    interaction.startDrag(mouseX, mouseY, widgetX, widgetY)
                 }
                 // Continue dragging
-                isDragging -> {
-                    val newX = (mouseX - dragOffsetX).coerceIn(0, screenWidth - widgetW)
-                    val newY = (mouseY - dragOffsetY).coerceIn(0, screenHeight - widgetH)
-                    PanelConfig.setLogPosition(newX, newY)
+                interaction.isDragging -> {
+                    val pos = interaction.updateDrag(mouseX, mouseY, screenWidth, screenHeight, widgetW, widgetH)
+                    if (pos != null) {
+                        PanelConfig.setLogPosition(pos.first, pos.second)
+                    }
                 }
             }
         } else {
             // Release interaction when mouse is released
-            val wasInteracting = isDragging || isResizing || isDraggingScrollbar
-            if (isDragging || isResizing) {
+            if (interaction.isDragging || interaction.isResizing) {
                 PanelConfig.save()
             }
-            if (wasInteracting) {
-                UIUtils.releaseInteraction(UIUtils.ActivePanel.BATTLE_LOG)
-            }
-            isDragging = false
-            isResizing = false
-            isDraggingScrollbar = false
+            interaction.releaseAll()
         }
 
         wasMousePressed = isMouseDown
-    }
-
-    private fun handleScrollbarDrag(mouseY: Int) {
-        val deltaY = mouseY - scrollbarDragStartY
-        val maxScroll = (contentHeight - visibleHeight).coerceAtLeast(0)
-
-        if (maxScroll <= 0 || scrollbarHeight <= 0) return
-
-        // Convert pixel delta to scroll delta
-        val scrollableTrackHeight = scrollbarHeight - scrollbarThumbHeight
-        if (scrollableTrackHeight <= 0) return
-
-        val scrollDelta = (deltaY.toFloat() / scrollableTrackHeight * maxScroll).toInt()
-        scrollOffset = (scrollbarDragStartOffset + scrollDelta).coerceIn(0, maxScroll)
-
-        // Update follow state
-        isFollowingBottom = scrollOffset >= maxScroll - BOTTOM_THRESHOLD
     }
 
     private fun handleFontKeybinds(handle: Long) {
@@ -615,14 +449,8 @@ object BattleLogWidget {
     }
 
     private fun handleResize(mouseX: Int, mouseY: Int, screenWidth: Int, screenHeight: Int) {
-        val result = UIUtils.calculateResize(
-            zone = resizeZone,
-            deltaX = mouseX - resizeStartX,
-            deltaY = mouseY - resizeStartY,
-            startX = resizeStartPanelX,
-            startY = resizeStartPanelY,
-            startWidth = resizeStartWidth,
-            startHeight = resizeStartHeight,
+        val result = interaction.calculateResize(
+            mouseX, mouseY,
             minWidth = PanelConfig.MIN_LOG_WIDTH,
             maxWidth = PanelConfig.MAX_LOG_WIDTH,
             minHeight = PanelConfig.MIN_LOG_HEIGHT,
@@ -662,20 +490,20 @@ object BattleLogWidget {
     }
 
     private fun renderResizeHandles(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
-        val handleColor = if (hoveredZone != UIUtils.ResizeZone.NONE || isResizing) RESIZE_HANDLE_HOVER else RESIZE_HANDLE_COLOR
+        val handleColor = if (interaction.hoveredZone != UIUtils.ResizeZone.NONE || interaction.isResizing) RESIZE_HANDLE_HOVER else RESIZE_HANDLE_COLOR
         val cornerLength = 12
         val thickness = 2
 
         beginFillBatch(context)
 
         // Bottom-right corner (always visible when hovering resize zone)
-        drawCornerHandle(context, x + width, y + height, cornerLength, thickness, handleColor, bottomRight = true)
+        UIUtils.drawCornerHandle(context, x + width, y + height, cornerLength, thickness, handleColor, bottomRight = true)
 
-        if (hoveredZone != UIUtils.ResizeZone.NONE || isResizing) {
+        if (interaction.hoveredZone != UIUtils.ResizeZone.NONE || interaction.isResizing) {
             // Other corners
-            drawCornerHandle(context, x, y, cornerLength, thickness, handleColor, topLeft = true)
-            drawCornerHandle(context, x + width, y, cornerLength, thickness, handleColor, topRight = true)
-            drawCornerHandle(context, x, y + height, cornerLength, thickness, handleColor, bottomLeft = true)
+            UIUtils.drawCornerHandle(context, x, y, cornerLength, thickness, handleColor, topLeft = true)
+            UIUtils.drawCornerHandle(context, x + width, y, cornerLength, thickness, handleColor, topRight = true)
+            UIUtils.drawCornerHandle(context, x, y + height, cornerLength, thickness, handleColor, bottomLeft = true)
 
             // Edge handles
             val edgeLength = 16
@@ -693,42 +521,6 @@ object BattleLogWidget {
         }
 
         endFillBatch(context)
-    }
-
-    /**
-     * Draws an L-shaped corner handle using context.fill().
-     * Must be called within a beginFillBatch/endFillBatch block.
-     */
-    private fun drawCornerHandle(
-        context: DrawContext,
-        cornerX: Int,
-        cornerY: Int,
-        length: Int,
-        thickness: Int,
-        color: Int,
-        topLeft: Boolean = false,
-        topRight: Boolean = false,
-        bottomLeft: Boolean = false,
-        bottomRight: Boolean = false
-    ) {
-        when {
-            topLeft -> {
-                context.fill(cornerX, cornerY, cornerX + length, cornerY + thickness, color)
-                context.fill(cornerX, cornerY, cornerX + thickness, cornerY + length, color)
-            }
-            topRight -> {
-                context.fill(cornerX - length, cornerY, cornerX, cornerY + thickness, color)
-                context.fill(cornerX - thickness, cornerY, cornerX, cornerY + length, color)
-            }
-            bottomLeft -> {
-                context.fill(cornerX, cornerY - thickness, cornerX + length, cornerY, color)
-                context.fill(cornerX, cornerY - length, cornerX + thickness, cornerY, color)
-            }
-            bottomRight -> {
-                context.fill(cornerX - length, cornerY - thickness, cornerX, cornerY, color)
-                context.fill(cornerX - thickness, cornerY - length, cornerX, cornerY, color)
-            }
-        }
     }
 
     private fun renderContent(context: DrawContext, x: Int, y: Int, width: Int, height: Int) {
@@ -931,28 +723,7 @@ object BattleLogWidget {
     }
 
     private fun renderScrollbar(context: DrawContext, x: Int, y: Int, height: Int) {
-        RenderSystem.enableBlend()
-        RenderSystem.defaultBlendFunc()
-
-        // Store bounds for click detection
-        scrollbarX = x
-        scrollbarY = y
-        scrollbarHeight = height
-
-        // Background track
-        context.fill(x, y, x + SCROLLBAR_WIDTH, y + height, applyOpacity(SCROLLBAR_BG))
-
-        // Thumb
-        val thumbHeight = ((visibleHeight.toFloat() / contentHeight) * height).toInt().coerceAtLeast(10)
-        val maxScroll = contentHeight - visibleHeight
-        val ratio = if (maxScroll > 0) scrollOffset.toFloat() / maxScroll else 0f
-        val thumbY = y + ((height - thumbHeight) * ratio).toInt()
-
-        // Store thumb bounds for click detection
-        scrollbarThumbY = thumbY
-        scrollbarThumbHeight = thumbHeight
-
-        context.fill(x, thumbY, x + SCROLLBAR_WIDTH, thumbY + thumbHeight, applyOpacity(SCROLLBAR_THUMB))
+        scrollbar.render(context, x, y, height, contentHeight, visibleHeight, scrollOffset)
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

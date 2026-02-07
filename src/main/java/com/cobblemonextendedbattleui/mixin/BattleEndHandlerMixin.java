@@ -12,6 +12,7 @@ import com.cobblemonextendedbattleui.BattleLog;
 import com.cobblemonextendedbattleui.BattleLogWidget;
 import com.cobblemonextendedbattleui.BattleStateTracker;
 import com.cobblemonextendedbattleui.DamageTracker;
+import com.cobblemonextendedbattleui.MoveTooltipRenderer;
 import com.cobblemonextendedbattleui.TeamIndicatorUI;
 import net.minecraft.client.MinecraftClient;
 
@@ -32,5 +33,6 @@ public class BattleEndHandlerMixin {
         BattleLog.INSTANCE.clear();
         BattleLogWidget.INSTANCE.clear();
         DamageTracker.INSTANCE.clear();
+        MoveTooltipRenderer.INSTANCE.clear();
     }
 }

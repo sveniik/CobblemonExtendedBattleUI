@@ -80,14 +80,29 @@ object MoveTooltipRenderer {
     private var activePokemonUuid: UUID? = null
     private var wasIncreaseFontKeyPressed = false
     private var wasDecreaseFontKeyPressed = false
+    private var mixinActiveLastFrame = false
 
     fun setActivePokemonUuid(uuid: UUID?) {
         activePokemonUuid = uuid
     }
 
+    /**
+     * Called each HUD render frame (before Screen render) to detect when the
+     * BattleMoveSelection mixin has stopped calling [clear]. Since HUD renders
+     * before Screen, this uses a 2-frame detection window: if the mixin didn't
+     * call [clear] during the previous frame's Screen render, hoveredMove is stale.
+     */
+    fun resetIfStale() {
+        if (!mixinActiveLastFrame) {
+            hoveredMove = null
+        }
+        mixinActiveLastFrame = false
+    }
+
     fun clear() {
         moveTileBounds.clear()
         hoveredMove = null
+        mixinActiveLastFrame = true
     }
 
     fun registerMoveTile(

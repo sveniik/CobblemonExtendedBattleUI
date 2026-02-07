@@ -3,6 +3,10 @@ package com.cobblemonextendedbattleui
 import com.cobblemon.mod.common.api.moves.Moves
 import com.cobblemon.mod.common.api.types.ElementalTypes
 import com.cobblemon.mod.common.client.render.drawScaledText
+import com.cobblemonextendedbattleui.pokemon.tooltip.MoveInfo
+import com.cobblemonextendedbattleui.pokemon.tooltip.PokeballBounds
+import com.cobblemonextendedbattleui.pokemon.tooltip.TooltipBoundsData
+import com.cobblemonextendedbattleui.pokemon.tooltip.TooltipData
 import com.mojang.blaze3d.systems.RenderSystem
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
@@ -61,12 +65,12 @@ object PokemonInfoPopup {
 
     internal fun render(
         context: DrawContext,
-        bounds: TeamIndicatorUI.PokeballBounds,
-        data: TeamIndicatorUI.TooltipData,
+        bounds: PokeballBounds,
+        data: TooltipData,
         screenWidth: Int,
         screenHeight: Int,
         isMinimised: Boolean
-    ): TeamIndicatorUI.TooltipBoundsData {
+    ): TooltipBoundsData {
         val tr = MinecraftClient.getInstance().textRenderer
         val fontScale = TeamIndicatorUI.TOOLTIP_FONT_SCALE * PanelConfig.tooltipFontScale
         val lineH = (TeamIndicatorUI.TOOLTIP_BASE_LINE_HEIGHT * fontScale).toInt().coerceAtLeast(7)
@@ -163,7 +167,7 @@ object PokemonInfoPopup {
         }
 
         context.matrices.pop()
-        return TeamIndicatorUI.TooltipBoundsData(px, py, popupWidth, totalHeight)
+        return TooltipBoundsData(px, py, popupWidth, totalHeight)
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -177,7 +181,7 @@ object PokemonInfoPopup {
         val footerTotalH: Int   // UIUtils.CELL_GAP + footerCellH, or 0
     )
 
-    private fun calculateLayout(data: TeamIndicatorUI.TooltipData, lineH: Int): PopupLayout {
+    private fun calculateLayout(data: TooltipData, lineH: Int): PopupLayout {
         val vPad = UIUtils.CELL_VPAD_TOP + UIUtils.CELL_VPAD_BOTTOM
 
         // Header: name+level, types+hp, optional tera
@@ -225,7 +229,7 @@ object PokemonInfoPopup {
     // ═══════════════════════════════════════════════════════════════
 
     private fun renderHeaderText(
-        context: DrawContext, data: TeamIndicatorUI.TooltipData,
+        context: DrawContext, data: TooltipData,
         x: Int, y: Int, w: Int, lineH: Int,
         fontScale: Float, tr: net.minecraft.client.font.TextRenderer
     ) {
@@ -355,7 +359,7 @@ object PokemonInfoPopup {
     // ═══════════════════════════════════════════════════════════════
 
     private fun renderLeftCellText(
-        context: DrawContext, data: TeamIndicatorUI.TooltipData,
+        context: DrawContext, data: TooltipData,
         x: Int, y: Int, w: Int,
         cellX: Int, cellW: Int,
         lineH: Int, fontScale: Float, tr: net.minecraft.client.font.TextRenderer
@@ -443,7 +447,7 @@ object PokemonInfoPopup {
     // ═══════════════════════════════════════════════════════════════
 
     private fun renderRightCellText(
-        context: DrawContext, data: TeamIndicatorUI.TooltipData,
+        context: DrawContext, data: TooltipData,
         x: Int, y: Int, w: Int,
         cellX: Int, cellW: Int,
         lineH: Int, fontScale: Float,
@@ -529,7 +533,7 @@ object PokemonInfoPopup {
     // ═══════════════════════════════════════════════════════════════
 
     private fun renderVolatilesText(
-        context: DrawContext, data: TeamIndicatorUI.TooltipData,
+        context: DrawContext, data: TooltipData,
         x: Int, y: Int, w: Int, lineH: Int,
         fontScale: Float, tr: net.minecraft.client.font.TextRenderer
     ) {
@@ -564,7 +568,7 @@ object PokemonInfoPopup {
     // ═══════════════════════════════════════════════════════════════
 
     private fun getActualStat(
-        data: TeamIndicatorUI.TooltipData,
+        data: TooltipData,
         stat: BattleStateTracker.BattleStat
     ): Int? = when (stat) {
         BattleStateTracker.BattleStat.ATTACK -> data.actualAttack
@@ -579,7 +583,7 @@ object PokemonInfoPopup {
         baseStat: Int,
         stat: BattleStateTracker.BattleStat,
         stage: Int,
-        data: TeamIndicatorUI.TooltipData
+        data: TooltipData
     ): Int {
         // Speed has its own comprehensive calculation (ability, status, item modifiers)
         if (stat == BattleStateTracker.BattleStat.SPEED) {
@@ -620,7 +624,7 @@ object PokemonInfoPopup {
         else -> TeamIndicatorUI.TOOLTIP_DIM
     }
 
-    private fun buildPpText(move: TeamIndicatorUI.MoveInfo, isPlayer: Boolean): String? =
+    private fun buildPpText(move: MoveInfo, isPlayer: Boolean): String? =
         if (isPlayer) {
             if (move.currentPp != null && move.maxPp != null) "(${move.currentPp}/${move.maxPp})" else null
         } else when {
@@ -630,7 +634,7 @@ object PokemonInfoPopup {
             else -> null
         }
 
-    private fun getPpColor(move: TeamIndicatorUI.MoveInfo, isPlayer: Boolean): Int {
+    private fun getPpColor(move: MoveInfo, isPlayer: Boolean): Int {
         val ratio = when {
             isPlayer && move.currentPp != null && move.maxPp != null ->
                 move.currentPp.toFloat() / move.maxPp.coerceAtLeast(1)

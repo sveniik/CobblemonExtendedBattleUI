@@ -1,30 +1,26 @@
 package com.cobblemonextendedbattleui
 
-import com.cobblemon.mod.common.api.moves.Moves
 import com.cobblemon.mod.common.api.pokemon.PokemonSpecies
-import com.cobblemon.mod.common.api.pokemon.stats.Stats
 import com.cobblemon.mod.common.api.pokemon.status.Status
-import com.cobblemon.mod.common.api.pokemon.status.Statuses
-import com.cobblemon.mod.common.api.types.ElementalType
-import com.cobblemon.mod.common.api.types.ElementalTypes
 import com.cobblemon.mod.common.api.types.tera.TeraType
 import com.cobblemon.mod.common.api.types.tera.TeraTypes
 import com.cobblemon.mod.common.client.CobblemonClient
 import com.cobblemon.mod.common.client.battle.ClientBattlePokemon
 import com.cobblemon.mod.common.client.battle.ClientBattleSide
-import com.cobblemon.mod.common.client.gui.drawProfilePokemon
-import com.cobblemon.mod.common.client.render.drawScaledText
-import com.cobblemon.mod.common.client.render.models.blockbench.FloatingState
-import com.cobblemon.mod.common.entity.PoseType
 import com.cobblemon.mod.common.pokemon.FormData
 import com.cobblemon.mod.common.pokemon.Pokemon
-import com.cobblemon.mod.common.pokemon.RenderablePokemon
+import com.cobblemonextendedbattleui.pokemon.render.PokemonModelRenderer
+import com.cobblemonextendedbattleui.pokemon.render.TeamPanelRenderer
+import com.cobblemonextendedbattleui.pokemon.tooltip.MoveInfo
+import com.cobblemonextendedbattleui.pokemon.tooltip.PokeballBounds
+import com.cobblemonextendedbattleui.pokemon.tooltip.TooltipBoundsData
+import com.cobblemonextendedbattleui.pokemon.tooltip.TooltipConstants
+import com.cobblemonextendedbattleui.pokemon.tooltip.TooltipData
+import com.cobblemonextendedbattleui.pokemon.tooltip.TooltipDataBuilder
 import net.minecraft.client.MinecraftClient
 import net.minecraft.client.gui.DrawContext
 import net.minecraft.client.util.InputUtil
-import net.minecraft.text.Text
 import net.minecraft.util.Identifier
-import org.joml.Quaternionf
 import org.lwjgl.glfw.GLFW
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -62,37 +58,9 @@ object TeamIndicatorUI {
     private val modelSize: Int get() = (BASE_MODEL_SIZE * PanelConfig.teamIndicatorScale).toInt()
     private val modelSpacing: Int get() = (BASE_MODEL_SPACING * PanelConfig.teamIndicatorScale).toInt()
 
-    // Background panel settings
-    private const val PANEL_PADDING_V = 2  // Vertical padding (top/bottom)
-    private const val PANEL_PADDING_H = 5  // Horizontal padding (left/right)
-    private const val PANEL_CORNER = 3     // Corner rounding radius
-    private val PANEL_BG = color(15, 20, 25, 180)       // Semi-transparent dark background
-    private val PANEL_BORDER = color(60, 70, 85, 200)   // Subtle border
-
-    // Fallback pokeball settings (used when model rendering fails)
-    private const val BALL_SIZE = 10
-    private const val BALL_SPACING = 3
-
-    // Colors
-    private val COLOR_NORMAL_TOP = color(255, 80, 80)      // Red top half
-    private val COLOR_NORMAL_BOTTOM = color(240, 240, 240) // White bottom half
-    private val COLOR_NORMAL_BAND = color(40, 40, 40)      // Dark band
-    private val COLOR_NORMAL_CENTER = color(255, 255, 255) // White center button
-
-    // Status colors (replace top half color)
-    private val COLOR_POISON = color(160, 90, 200)         // Purple
-    private val COLOR_BURN = color(255, 140, 50)           // Orange
-    private val COLOR_PARALYSIS = color(255, 220, 50)      // Yellow
-    private val COLOR_FREEZE = color(100, 200, 255)        // Light blue
-    private val COLOR_SLEEP = color(150, 150, 170)         // Gray-ish
-
-    // KO colors
-    private val COLOR_KO_TOP = color(80, 80, 80)
-    private val COLOR_KO_BOTTOM = color(60, 60, 60)
-    private val COLOR_KO_BAND = color(40, 40, 40)
-    private val COLOR_KO_CENTER = color(100, 100, 100)
-
-    private fun color(r: Int, g: Int, b: Int, a: Int = 255): Int = UIUtils.color(r, g, b, a)
+    // Panel padding (used for bounds calculations; rendering delegated to TeamPanelRenderer)
+    private const val PANEL_PADDING_V = 2
+    private const val PANEL_PADDING_H = 5
 
     private var isMinimised: Boolean = false
 
@@ -136,77 +104,11 @@ object TeamIndicatorUI {
     // Maps: isLeftSide -> Set of UUIDs that were in activePokemon
     private val previouslyActiveUuids = ConcurrentHashMap<Boolean, MutableSet<UUID>>()
 
-    // FloatingState cache for Pokemon model rendering (one per UUID)
-    private val floatingStates = ConcurrentHashMap<UUID, FloatingState>()
-
     private var lastBattleId: UUID? = null
-
-    private fun getOrCreateFloatingState(uuid: UUID): FloatingState {
-        return floatingStates.computeIfAbsent(uuid) { FloatingState() }
-    }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Hover Tooltip Support
     // ═══════════════════════════════════════════════════════════════════════════
-
-    /**
-     * Bounds for a rendered pokeball, used for hover detection.
-     */
-    data class PokeballBounds(
-        val x: Int,
-        val y: Int,
-        val width: Int,
-        val height: Int,
-        val uuid: UUID,
-        val isLeftSide: Boolean,
-        val isPlayerPokemon: Boolean  // True if this is the player's own Pokemon (not opponent/spectated)
-    )
-
-    /**
-     * Move information including PP (for player's Pokemon) or estimated (for opponent).
-     */
-    data class MoveInfo(
-        val name: String,
-        val currentPp: Int? = null,        // Exact PP for player's Pokemon
-        val maxPp: Int? = null,            // Max PP for player's Pokemon
-        val estimatedRemaining: Int? = null, // Estimated remaining PP (assumes PP Max)
-        val estimatedMax: Int? = null,     // Estimated max PP (base * 8/5)
-        val usageCount: Int? = null        // Times used (for unknown moves)
-    )
-
-    /**
-     * Aggregated data for tooltip display.
-     */
-    data class TooltipData(
-        val uuid: UUID,  // UUID for looking up revealed ability in speed calculations
-        val pokemonName: String,
-        val pokemonId: Identifier?,
-        val hpPercent: Float,
-        val statusCondition: Status?,
-        val isKO: Boolean,
-        val moves: List<MoveInfo>,
-        val item: BattleStateTracker.TrackedItem?,
-        val statChanges: Map<BattleStateTracker.BattleStat, Int>,
-        val volatileStatuses: Set<BattleStateTracker.VolatileStatusState>,
-        val level: Int?,
-        val speciesName: String?,
-        val isPlayerPokemon: Boolean,
-        val actualSpeed: Int? = null,
-        val actualAttack: Int? = null,
-        val actualSpecialAttack: Int? = null,
-        val actualDefence: Int? = null,
-        val actualSpecialDefence: Int? = null,
-        val abilityName: String? = null,  // Known ability (player Pokemon or revealed)
-        val possibleAbilities: List<String>? = null,  // Possible abilities if not yet revealed (opponent)
-        val primaryType: ElementalType? = null,
-        val secondaryType: ElementalType? = null,
-        val teraType: TeraType? = null,
-        val form: FormData? = null,
-        val lostPrimaryType: Boolean = false,  // True if primary type was lost (show "???")
-        val addedTypes: List<String> = emptyList(),  // Types added by moves (Trick-or-Treat, Forest's Curse)
-        val isTerastallized: Boolean = false,  // True if Pokemon is currently Terastallized
-        val activeTeraTypeName: String? = null  // The active Tera type name when Terastallized
-    )
 
     // Currently rendered pokeball bounds (refreshed each frame)
     private val pokeballBounds = mutableListOf<PokeballBounds>()
@@ -216,8 +118,6 @@ object TeamIndicatorUI {
 
     // Currently rendered tooltip bounds (for input handling)
     private var tooltipBounds: TooltipBoundsData? = null
-
-    internal data class TooltipBoundsData(val x: Int, val y: Int, val width: Int, val height: Int)
 
     // Team panel bounds (for input handling - covers all pokeball indicators)
     private var leftTeamPanelBounds: TooltipBoundsData? = null
@@ -254,399 +154,49 @@ object TeamIndicatorUI {
     // Mouse button state tracking
     private var wasMouseButtonDown = false
 
-    // Tooltip colors (internal for PokemonInfoPopup access)
-    internal val TOOLTIP_BG = color(22, 27, 34, 245)
-    internal val TOOLTIP_BORDER = color(55, 65, 80, 255)
-    internal val TOOLTIP_TEXT = color(220, 225, 230, 255)
-    internal val TOOLTIP_HEADER = color(255, 255, 255, 255)
-    internal val TOOLTIP_LABEL = color(140, 150, 165, 255)
-    internal val TOOLTIP_DIM = color(100, 110, 120, 255)
-    internal val TOOLTIP_HP_HIGH = color(100, 220, 100, 255)
-    internal val TOOLTIP_HP_MED = color(220, 180, 50, 255)
-    internal val TOOLTIP_HP_LOW = color(220, 80, 80, 255)
-    internal val TOOLTIP_STAT_BOOST = color(100, 200, 100, 255)
-    internal val TOOLTIP_STAT_DROP = color(200, 100, 100, 255)
-    internal const val TOOLTIP_PADDING = 6
-    internal const val TOOLTIP_CORNER = 3
-    internal const val TOOLTIP_BASE_LINE_HEIGHT = 10  // Base line height before scaling
-    internal const val TOOLTIP_FONT_SCALE = 0.85f     // Base font scale multiplier
-    internal val TOOLTIP_SPEED = color(150, 180, 220, 255)
-    internal val TOOLTIP_DEFENSE = color(150, 220, 180, 255)
-    internal val TOOLTIP_SPECIAL_DEFENSE = color(180, 150, 220, 255)
-    internal val TOOLTIP_ATTACK = color(220, 150, 150, 255)
-    internal val TOOLTIP_SPECIAL_ATTACK = color(220, 180, 150, 255)
-    internal val TOOLTIP_PP = color(255, 210, 80, 255)
-    internal val TOOLTIP_PP_LOW = color(255, 100, 80, 255)
-    internal val TOOLTIP_ABILITY = color(200, 180, 255, 255)           // Purple for known ability
-    internal val TOOLTIP_ABILITY_POSSIBLE = color(160, 150, 180, 255)  // Dimmer purple for possible abilities
+    // Tooltip color delegations for PokemonInfoPopup (actual definitions in TooltipConstants)
+    internal val TOOLTIP_TEXT get() = TooltipConstants.TOOLTIP_TEXT
+    internal val TOOLTIP_HEADER get() = TooltipConstants.TOOLTIP_HEADER
+    internal val TOOLTIP_LABEL get() = TooltipConstants.TOOLTIP_LABEL
+    internal val TOOLTIP_DIM get() = TooltipConstants.TOOLTIP_DIM
+    internal val TOOLTIP_HP_HIGH get() = TooltipConstants.TOOLTIP_HP_HIGH
+    internal val TOOLTIP_HP_MED get() = TooltipConstants.TOOLTIP_HP_MED
+    internal val TOOLTIP_HP_LOW get() = TooltipConstants.TOOLTIP_HP_LOW
+    internal val TOOLTIP_STAT_BOOST get() = TooltipConstants.TOOLTIP_STAT_BOOST
+    internal val TOOLTIP_STAT_DROP get() = TooltipConstants.TOOLTIP_STAT_DROP
+    internal const val TOOLTIP_BASE_LINE_HEIGHT = 10
+    internal const val TOOLTIP_FONT_SCALE = 0.85f
+    internal val TOOLTIP_SPEED get() = TooltipConstants.TOOLTIP_SPEED
+    internal val TOOLTIP_DEFENSE get() = TooltipConstants.TOOLTIP_DEFENSE
+    internal val TOOLTIP_SPECIAL_DEFENSE get() = TooltipConstants.TOOLTIP_SPECIAL_DEFENSE
+    internal val TOOLTIP_ATTACK get() = TooltipConstants.TOOLTIP_ATTACK
+    internal val TOOLTIP_SPECIAL_ATTACK get() = TooltipConstants.TOOLTIP_SPECIAL_ATTACK
+    internal val TOOLTIP_PP get() = TooltipConstants.TOOLTIP_PP
+    internal val TOOLTIP_PP_LOW get() = TooltipConstants.TOOLTIP_PP_LOW
+    internal val TOOLTIP_ABILITY get() = TooltipConstants.TOOLTIP_ABILITY
+    internal val TOOLTIP_ABILITY_POSSIBLE get() = TooltipConstants.TOOLTIP_ABILITY_POSSIBLE
 
-    // Ability ID -> Display Name lookup for compound words that can't be split programmatically
-    private val ABILITY_DISPLAY_NAMES = mapOf(
-        "earlybird" to "Early Bird",
-        "flashfire" to "Flash Fire",
-        "swiftswim" to "Swift Swim",
-        "chlorophyll" to "Chlorophyll",
-        "sandveil" to "Sand Veil",
-        "sandrush" to "Sand Rush",
-        "sandstream" to "Sand Stream",
-        "sandforce" to "Sand Force",
-        "slushrush" to "Slush Rush",
-        "snowcloak" to "Snow Cloak",
-        "snowwarning" to "Snow Warning",
-        "icebody" to "Ice Body",
-        "iceface" to "Ice Face",
-        "icescales" to "Ice Scales",
-        "dryskin" to "Dry Skin",
-        "waterveil" to "Water Veil",
-        "waterabsorb" to "Water Absorb",
-        "waterbubble" to "Water Bubble",
-        "raindish" to "Rain Dish",
-        "drizzle" to "Drizzle",
-        "drought" to "Drought",
-        "solarpower" to "Solar Power",
-        "moldbreaker" to "Mold Breaker",
-        "toughclaws" to "Tough Claws",
-        "strongjaw" to "Strong Jaw",
-        "hugepower" to "Huge Power",
-        "purepower" to "Pure Power",
-        "hustle" to "Hustle",
-        "guts" to "Guts",
-        "sheerforce" to "Sheer Force",
-        "ironfist" to "Iron Fist",
-        "technician" to "Technician",
-        "skilllink" to "Skill Link",
-        "serenegrace" to "Serene Grace",
-        "superluck" to "Super Luck",
-        "sniper" to "Sniper",
-        "infiltrator" to "Infiltrator",
-        "scrappy" to "Scrappy",
-        "noguard" to "No Guard",
-        "compoundeyes" to "Compound Eyes",
-        "keeneye" to "Keen Eye",
-        "wonderguard" to "Wonder Guard",
-        "multiscale" to "Multiscale",
-        "solidrock" to "Solid Rock",
-        "filter" to "Filter",
-        "thickfat" to "Thick Fat",
-        "furcoat" to "Fur Coat",
-        "fluffy" to "Fluffy",
-        "battlearmor" to "Battle Armor",
-        "shellarmor" to "Shell Armor",
-        "magicguard" to "Magic Guard",
-        "magicbounce" to "Magic Bounce",
-        "naturalcure" to "Natural Cure",
-        "regenerator" to "Regenerator",
-        "poisonheal" to "Poison Heal",
-        "immunity" to "Immunity",
-        "limber" to "Limber",
-        "owntempo" to "Own Tempo",
-        "innerfocus" to "Inner Focus",
-        "steadfast" to "Steadfast",
-        "contrary" to "Contrary",
-        "defiant" to "Defiant",
-        "competitive" to "Competitive",
-        "speedboost" to "Speed Boost",
-        "moxie" to "Moxie",
-        "beastboost" to "Beast Boost",
-        "intimidate" to "Intimidate",
-        "pressure" to "Pressure",
-        "unnerve" to "Unnerve",
-        "unaware" to "Unaware",
-        "oblivious" to "Oblivious",
-        "trace" to "Trace",
-        "imposter" to "Imposter",
-        "prankster" to "Prankster",
-        "protean" to "Protean",
-        "libero" to "Libero",
-        "levitate" to "Levitate",
-        "sturdy" to "Sturdy",
-        "anticipation" to "Anticipation",
-        "forewarn" to "Forewarn",
-        "frisk" to "Frisk",
-        "pickup" to "Pickup",
-        "harvest" to "Harvest",
-        "runaway" to "Run Away",
-        "quickfeet" to "Quick Feet",
-        "unburden" to "Unburden",
-        "shadowtag" to "Shadow Tag",
-        "arenatrap" to "Arena Trap",
-        "magnetpull" to "Magnet Pull",
-        "stickyhold" to "Sticky Hold",
-        "suctioncups" to "Suction Cups"
-    )
+    // Ability name formatting (used internally and by tooltip builder)
+    private fun formatAbilityName(abilityId: String): String = TooltipDataBuilder.formatAbilityName(abilityId)
 
-    /**
-     * Format an ability ID into a proper display name.
-     * Uses lookup table for compound words, falls back to formatting for unknown abilities.
-     */
-    internal fun formatAbilityName(abilityId: String): String {
-        // Check lookup first
-        ABILITY_DISPLAY_NAMES[abilityId.lowercase()]?.let { return it }
+    // Stat/Speed calculation delegations for PokemonInfoPopup
+    internal fun getStageMultiplier(stage: Int): Double = com.cobblemonextendedbattleui.pokemon.stats.StatCalculator.getStageMultiplier(stage)
+    internal fun canPokemonEvolve(pokemonId: Identifier?): Boolean = com.cobblemonextendedbattleui.pokemon.stats.StatCalculator.canPokemonEvolve(pokemonId)
+    internal fun getItemAttackMultiplier(itemName: String?, speciesName: String?): Double = com.cobblemonextendedbattleui.pokemon.stats.StatCalculator.getItemAttackMultiplier(itemName, speciesName)
+    internal fun getItemSpecialAttackMultiplier(itemName: String?, speciesName: String?): Double = com.cobblemonextendedbattleui.pokemon.stats.StatCalculator.getItemSpecialAttackMultiplier(itemName, speciesName)
+    internal fun getItemDefenseMultiplier(itemName: String?, canEvolve: Boolean): Double = com.cobblemonextendedbattleui.pokemon.stats.StatCalculator.getItemDefenseMultiplier(itemName, canEvolve)
+    internal fun getItemSpecialDefenseMultiplier(itemName: String?, speciesName: String?, canEvolve: Boolean): Double = com.cobblemonextendedbattleui.pokemon.stats.StatCalculator.getItemSpecialDefenseMultiplier(itemName, speciesName, canEvolve)
 
-        // Fallback: handle underscore/camelCase separation
-        return abilityId
-            .replace("_", " ")
-            .split(Regex("(?=[A-Z])|\\s+"))
-            .filter { it.isNotBlank() }
-            .joinToString(" ") { word ->
-                when (word.lowercase()) {
-                    "hp" -> "HP"
-                    "pp" -> "PP"
-                    else -> word.replaceFirstChar { it.uppercase() }
-                }
-            }
-    }
+    internal fun calculateEffectiveSpeed(baseSpeed: Int, speedStage: Int, abilityName: String?, status: Status?, itemName: String?, itemConsumed: Boolean): Int =
+        com.cobblemonextendedbattleui.pokemon.stats.SpeedCalculator.calculateEffectiveSpeed(baseSpeed, speedStage, abilityName, status, itemName, itemConsumed)
 
-    // ================== Stat Calculation Utilities ==================
-
-    /**
-     * Get the stat stage multiplier for a given stage (-6 to +6).
-     * Uses the standard Pokemon formula: (2 + stage) / 2 for positive, 2 / (2 - stage) for negative.
-     */
-    internal fun getStageMultiplier(stage: Int): Double {
-        return if (stage >= 0) {
-            (2.0 + stage) / 2.0
-        } else {
-            2.0 / (2.0 - stage)
-        }
-    }
-
-    /**
-     * Calculate a stat value using the standard Pokemon formula.
-     * stat = floor((floor((2 * base + iv + floor(ev/4)) * level / 100) + 5) * nature)
-     */
-    internal fun calculateStat(base: Int, level: Int, iv: Int, ev: Int, natureMod: Double): Int {
-        val inner = ((2 * base + iv + ev / 4) * level / 100) + 5
-        return (inner * natureMod).toInt()
-    }
-
-    // ================== Speed Modifier Utilities ==================
-
-    /**
-     * Normalize ability name for comparison (lowercase, no spaces/underscores).
-     */
-    internal fun normalizeAbilityName(name: String?): String? =
-        name?.lowercase()?.replace(" ", "")?.replace("_", "")
-
-    /**
-     * Weather-based speed-doubling abilities.
-     */
-    internal val WEATHER_SPEED_ABILITIES = mapOf(
-        "chlorophyll" to BattleStateTracker.Weather.SUN,
-        "swiftswim" to BattleStateTracker.Weather.RAIN,
-        "sandrush" to BattleStateTracker.Weather.SANDSTORM,
-        "slushrush" to BattleStateTracker.Weather.SNOW
-    )
-
-    /**
-     * Terrain-based speed abilities.
-     */
-    internal val TERRAIN_SPEED_ABILITIES = mapOf(
-        "surgesurfer" to BattleStateTracker.Terrain.ELECTRIC
-    )
-
-    /**
-     * Get speed multiplier from ability given current battle conditions.
-     * Returns 1.0 if ability doesn't affect speed or conditions aren't met.
-     */
-    internal fun getAbilitySpeedMultiplier(
-        abilityName: String?,
-        weather: BattleStateTracker.Weather?,
-        terrain: BattleStateTracker.Terrain?,
-        hasStatus: Boolean,
-        itemConsumed: Boolean
-    ): Double {
-        val normalizedAbility = normalizeAbilityName(abilityName) ?: return 1.0
-
-        // Weather-based abilities (2x)
-        WEATHER_SPEED_ABILITIES[normalizedAbility]?.let { requiredWeather ->
-            // Handle Slush Rush which works in both Snow and Hail
-            if (normalizedAbility == "slushrush") {
-                if (weather == BattleStateTracker.Weather.SNOW || weather == BattleStateTracker.Weather.HAIL) {
-                    return 2.0
-                }
-            } else if (weather == requiredWeather) {
-                return 2.0
-            }
-        }
-
-        // Terrain-based abilities (2x)
-        TERRAIN_SPEED_ABILITIES[normalizedAbility]?.let { requiredTerrain ->
-            if (terrain == requiredTerrain) return 2.0
-        }
-
-        // Quick Feet (1.5x when statused, also ignores paralysis speed drop)
-        if (normalizedAbility == "quickfeet" && hasStatus) return 1.5
-
-        // Unburden (2x after item consumed)
-        if (normalizedAbility == "unburden" && itemConsumed) return 2.0
-
-        return 1.0
-    }
-
-    /**
-     * Get speed multiplier from status condition.
-     * Quick Feet negates paralysis speed penalty.
-     */
-    internal fun getStatusSpeedMultiplier(status: Status?, abilityName: String?): Double {
-        if (status == Statuses.PARALYSIS) {
-            // Quick Feet ignores paralysis speed penalty
-            if (normalizeAbilityName(abilityName) == "quickfeet") return 1.0
-            return 0.5
-        }
-        return 1.0
-    }
-
-    /**
-     * Get speed multiplier from held item.
-     */
-    internal fun getItemSpeedMultiplier(itemName: String?): Double {
-        if (itemName == null) return 1.0
-        val normalizedItem = itemName.lowercase().replace(" ", "").replace("_", "")
-        return when (normalizedItem) {
-            "choicescarf" -> 1.5
-            "ironball" -> 0.5
-            else -> 1.0
-        }
-    }
-
-    /**
-     * Get Attack multiplier from held item.
-     * Supports: Choice Band (1.5x), Thick Club (2x for Cubone/Marowak), Light Ball (2x for Pikachu)
-     */
-    internal fun getItemAttackMultiplier(itemName: String?, speciesName: String?): Double {
-        if (itemName == null) return 1.0
-        val normalizedItem = itemName.lowercase().replace(" ", "").replace("_", "")
-        val species = speciesName?.lowercase()?.replace(" ", "")?.replace("-", "") ?: ""
-        return when {
-            normalizedItem == "choiceband" -> 1.5
-            normalizedItem == "thickclub" && species in listOf("cubone", "marowak", "marowakalola") -> 2.0
-            normalizedItem == "lightball" && species.startsWith("pikachu") -> 2.0
-            else -> 1.0
-        }
-    }
-
-    /**
-     * Get Special Attack multiplier from held item.
-     * Supports: Choice Specs (1.5x), Light Ball (2x for Pikachu), Deep Sea Tooth (2x for Clamperl)
-     */
-    internal fun getItemSpecialAttackMultiplier(itemName: String?, speciesName: String?): Double {
-        if (itemName == null) return 1.0
-        val normalizedItem = itemName.lowercase().replace(" ", "").replace("_", "")
-        val species = speciesName?.lowercase()?.replace(" ", "")?.replace("-", "") ?: ""
-        return when {
-            normalizedItem == "choicespecs" -> 1.5
-            normalizedItem == "lightball" && species.startsWith("pikachu") -> 2.0
-            normalizedItem == "deepseatooth" && species == "clamperl" -> 2.0
-            else -> 1.0
-        }
-    }
-
-    /**
-     * Get Defense multiplier from held item.
-     * Supports: Eviolite (1.5x for non-fully evolved Pokemon)
-     */
-    internal fun getItemDefenseMultiplier(itemName: String?, canEvolve: Boolean): Double {
-        if (itemName == null) return 1.0
-        val normalizedItem = itemName.lowercase().replace(" ", "").replace("_", "")
-        return when {
-            normalizedItem == "eviolite" && canEvolve -> 1.5
-            else -> 1.0
-        }
-    }
-
-    /**
-     * Get Special Defense multiplier from held item.
-     * Supports: Assault Vest (1.5x), Eviolite (1.5x for non-fully evolved), Deep Sea Scale (2x for Clamperl)
-     */
-    internal fun getItemSpecialDefenseMultiplier(itemName: String?, speciesName: String?, canEvolve: Boolean): Double {
-        if (itemName == null) return 1.0
-        val normalizedItem = itemName.lowercase().replace(" ", "").replace("_", "")
-        val species = speciesName?.lowercase()?.replace(" ", "")?.replace("-", "") ?: ""
-        return when {
-            normalizedItem == "assaultvest" -> 1.5
-            normalizedItem == "eviolite" && canEvolve -> 1.5
-            normalizedItem == "deepseascale" && species == "clamperl" -> 2.0
-            else -> 1.0
-        }
-    }
-
-    /**
-     * Check if a Pokemon can still evolve (for Eviolite eligibility).
-     * Returns true if the species has any evolutions defined.
-     */
-    internal fun canPokemonEvolve(pokemonId: Identifier?): Boolean {
-        if (pokemonId == null) return false
-        val species = PokemonSpecies.getByIdentifier(pokemonId) ?: return false
-        return species.evolutions.isNotEmpty()
-    }
-
-    /**
-     * Check if species can have any speed-boosting ability that's currently active.
-     * Returns the max multiplier if any ability could apply, 1.0 otherwise.
-     */
-    internal fun getMaxPossibleAbilitySpeedMultiplier(
-        pokemonId: Identifier,
-        weather: BattleStateTracker.Weather?,
-        terrain: BattleStateTracker.Terrain?,
-        hasStatus: Boolean,
-        itemConsumed: Boolean
-    ): Double {
-        val species = PokemonSpecies.getByIdentifier(pokemonId) ?: return 1.0
-        var maxMultiplier = 1.0
-
-        // Get all possible abilities for this species
-        val possibleAbilities = species.abilities.mapNotNull { normalizeAbilityName(it.template.name) }
-
-        for (ability in possibleAbilities) {
-            val mult = getAbilitySpeedMultiplier(ability, weather, terrain, hasStatus, itemConsumed)
-            if (mult > maxMultiplier) maxMultiplier = mult
-        }
-
-        return maxMultiplier
-    }
-
-    /**
-     * Calculate effective speed for player's Pokemon with all modifiers.
-     */
-    internal fun calculateEffectiveSpeed(
-        baseSpeed: Int,
-        speedStage: Int,
-        abilityName: String?,
-        status: Status?,
-        itemName: String?,
-        itemConsumed: Boolean
-    ): Int {
-        val weather = BattleStateTracker.weather?.type
-        val terrain = BattleStateTracker.terrain?.type
-        val hasStatus = status != null
-
-        val stageMultiplier = getStageMultiplier(speedStage)
-        val abilityMultiplier = getAbilitySpeedMultiplier(abilityName, weather, terrain, hasStatus, itemConsumed)
-        val statusMultiplier = getStatusSpeedMultiplier(status, abilityName)
-        val itemMultiplier = if (!itemConsumed) getItemSpeedMultiplier(itemName) else 1.0
-
-        return (baseSpeed * stageMultiplier * abilityMultiplier * statusMultiplier * itemMultiplier).toInt()
-    }
-
-    /**
-     * Result of opponent speed range calculation.
-     */
     internal data class SpeedRangeResult(
         val minSpeed: Int,
         val maxSpeed: Int,
-        val abilityNote: String? = null,  // Note if ability could boost speed
-        val itemNote: String? = null      // Note if item affects speed (Choice Scarf, Iron Ball)
+        val abilityNote: String? = null,
+        val itemNote: String? = null
     )
 
-    /**
-     * Calculate speed range for opponent with all modifiers considered.
-     *
-     * When the opponent's ability has been revealed (e.g., Battle Armor triggers),
-     * we use only that ability for speed calculations - not all possible species abilities.
-     * This prevents inflated max speed from impossible abilities (e.g., Swift Swim showing
-     * when we KNOW the Kabutops has Battle Armor).
-     */
     internal fun calculateOpponentSpeedRange(
         uuid: UUID,
         pokemonId: Identifier,
@@ -656,98 +206,10 @@ object TeamIndicatorUI {
         knownItem: BattleStateTracker.TrackedItem?,
         form: FormData?
     ): SpeedRangeResult? {
-        val species = PokemonSpecies.getByIdentifier(pokemonId) ?: return null
-        val baseSpeed = if (form != null) form.baseStats[Stats.SPEED] ?: return null
-        else species.baseStats[Stats.SPEED] ?: return null
-
-        val weather = BattleStateTracker.weather?.type
-        val terrain = BattleStateTracker.terrain?.type
-        val hasStatus = status != null
-        val itemConsumed = knownItem?.status != BattleStateTracker.ItemStatus.HELD
-
-        // Calculate base stat range (0 IV/0 EV/- nature to 31 IV/252 EV/+ nature)
-        val minBaseStat = calculateStat(baseSpeed, level, 0, 0, 0.9)
-        val maxBaseStat = calculateStat(baseSpeed, level, 31, 252, 1.1)
-
-        val stageMultiplier = getStageMultiplier(speedStage)
-        val statusMultiplier = getStatusSpeedMultiplier(status, null)  // Conservative: assume no Quick Feet for min
-
-        // Calculate item speed multiplier if item is known and held
-        val itemName = if (!itemConsumed) knownItem?.name else null
-        val itemMultiplier = if (itemName != null) getItemSpeedMultiplier(itemName) else 1.0
-
-        // For min speed: assume worst case (no ability boost, paralysis penalty if paralyzed)
-        // Item multiplier applies to both min and max since we know the item
-        val minSpeed = (minBaseStat * stageMultiplier * statusMultiplier * itemMultiplier).toInt()
-
-        // Check if ability has been revealed - if so, only use that specific ability
-        val revealedAbility = BattleStateTracker.getRevealedAbility(uuid)
-
-        // For max speed: use revealed ability if known, otherwise consider all possibilities
-        val maxAbilityMultiplier = if (revealedAbility != null) {
-            // Ability is known - use only this ability's speed multiplier
-            getAbilitySpeedMultiplier(normalizeAbilityName(revealedAbility), weather, terrain, hasStatus, itemConsumed)
-        } else {
-            // Ability unknown - consider all possible abilities (existing behavior)
-            getMaxPossibleAbilitySpeedMultiplier(pokemonId, weather, terrain, hasStatus, itemConsumed)
-        }
-
-        // For paralysis: Quick Feet could negate the penalty AND give 1.5x
-        val maxStatusMultiplier = if (status == Statuses.PARALYSIS) {
-            if (revealedAbility != null) {
-                // Ability known - check if it's Quick Feet
-                if (normalizeAbilityName(revealedAbility) == "quickfeet") 1.0 else statusMultiplier
-            } else {
-                // Ability unknown - check if Quick Feet is possible
-                val possibleAbilities = species.abilities.mapNotNull { normalizeAbilityName(it.template.name) }
-                if ("quickfeet" in possibleAbilities) 1.0 else statusMultiplier
-            }
-        } else {
-            1.0
-        }
-
-        val maxSpeed =
-            (maxBaseStat * stageMultiplier * maxAbilityMultiplier.coerceAtLeast(1.0) * maxStatusMultiplier * itemMultiplier).toInt()
-
-        // Generate ability note if conditions apply
-        val abilityNote = if (revealedAbility != null) {
-            // Ability is known - only show note if THIS ability has an active speed boost
-            if (maxAbilityMultiplier > 1.0) {
-                formatAbilityName(revealedAbility)  // No "?" since we know the ability
-            } else {
-                null
-            }
-        } else {
-            // Ability unknown - show possible speed-boosting abilities with "?"
-            when {
-                maxAbilityMultiplier > 1.0 -> {
-                    val activeConditions = mutableListOf<String>()
-                    val normalizedAbilities = species.abilities.mapNotNull { normalizeAbilityName(it.template.name) }
-                    if (weather == BattleStateTracker.Weather.SUN && "chlorophyll" in normalizedAbilities) {
-                        activeConditions.add("Chlorophyll")
-                    }
-                    if (weather == BattleStateTracker.Weather.RAIN && "swiftswim" in normalizedAbilities) {
-                        activeConditions.add("Swift Swim")
-                    }
-                    if (weather == BattleStateTracker.Weather.SANDSTORM && "sandrush" in normalizedAbilities) {
-                        activeConditions.add("Sand Rush")
-                    }
-                    if ((weather == BattleStateTracker.Weather.SNOW || weather == BattleStateTracker.Weather.HAIL) && "slushrush" in normalizedAbilities) {
-                        activeConditions.add("Slush Rush")
-                    }
-                    if (terrain == BattleStateTracker.Terrain.ELECTRIC && "surgesurfer" in normalizedAbilities) {
-                        activeConditions.add("Surge Surfer")
-                    }
-                    if (activeConditions.isNotEmpty()) activeConditions.joinToString("/") + "?" else null
-                }
-                else -> null
-            }
-        }
-
-        // Generate item note if item affects speed
-        val itemNote = if (itemMultiplier != 1.0 && itemName != null) itemName else null
-
-        return SpeedRangeResult(minSpeed, maxSpeed, abilityNote, itemNote)
+        val result = com.cobblemonextendedbattleui.pokemon.stats.SpeedCalculator.calculateOpponentSpeedRange(
+            uuid, pokemonId, level, speedStage, status, knownItem, form, ::formatAbilityName
+        ) ?: return null
+        return SpeedRangeResult(result.minSpeed, result.maxSpeed, result.abilityNote, result.itemNote)
     }
 
     /**
@@ -759,7 +221,7 @@ object TeamIndicatorUI {
         knockedOutPokemon.clear()
         pendingTransforms.clear()
         previouslyActiveUuids.clear()
-        floatingStates.clear()
+        PokemonModelRenderer.clearFloatingStates()
         pokeballBounds.clear()
         hoveredPokeball = null
         tooltipBounds = null
@@ -1708,281 +1170,19 @@ object TeamIndicatorUI {
     private const val HELP_ICON_SIZE = 8
     private const val HELP_ICON_MARGIN = 2
 
-    /**
-     * Calculate panel dimensions based on team size and current orientation/scale.
-     */
-    private fun calculatePanelDimensions(teamSize: Int): Pair<Int, Int> {
-        if (teamSize <= 0) return Pair(0, 0)
+    private fun calculatePanelDimensions(teamSize: Int): Pair<Int, Int> =
+        TeamPanelRenderer.calculatePanelDimensions(teamSize, modelSize, modelSpacing)
 
-        val isVertical = PanelConfig.teamIndicatorOrientation == PanelConfig.TeamIndicatorOrientation.VERTICAL
-        return if (isVertical) {
-            val panelWidth = modelSize + PANEL_PADDING_H * 2
-            val panelHeight = teamSize * modelSize + (teamSize - 1) * modelSpacing + PANEL_PADDING_V * 2
-            Pair(panelWidth, panelHeight)
-        } else {
-            val panelWidth = teamSize * modelSize + (teamSize - 1) * modelSpacing + PANEL_PADDING_H * 2
-            val panelHeight = modelSize + PANEL_PADDING_V * 2
-            Pair(panelWidth, panelHeight)
-        }
-    }
+    private fun drawTeamPanel(context: DrawContext, x: Int, y: Int, teamSize: Int) =
+        TeamPanelRenderer.drawTeamPanel(context, x, y, teamSize, modelSize, modelSpacing, ::applyOpacity)
 
-    /**
-     * Draw a background panel behind the team's Pokemon models.
-     */
-    private fun drawTeamPanel(context: DrawContext, x: Int, y: Int, teamSize: Int) {
-        if (teamSize <= 0) return
+    private fun drawPanelCornerOverlays(context: DrawContext, x: Int, y: Int, teamSize: Int) =
+        TeamPanelRenderer.drawPanelCornerOverlays(context, x, y, teamSize, modelSize, modelSpacing, ::applyOpacity)
 
-        val (panelWidth, panelHeight) = calculatePanelDimensions(teamSize)
-
-        val panelX = x - PANEL_PADDING_H
-        val panelY = y - PANEL_PADDING_V
-
-        // Apply opacity for minimized state
-        val bg = applyOpacity(PANEL_BG)
-        val border = applyOpacity(PANEL_BORDER)
-
-        // Draw main background (cross pattern for rounded corners)
-        context.fill(panelX + PANEL_CORNER, panelY, panelX + panelWidth - PANEL_CORNER, panelY + panelHeight, bg)
-        context.fill(panelX, panelY + PANEL_CORNER, panelX + panelWidth, panelY + panelHeight - PANEL_CORNER, bg)
-
-        // Fill corners with graduated rounding (creates smooth curve)
-        // Top-left corner
-        context.fill(panelX + 2, panelY + 1, panelX + PANEL_CORNER, panelY + 2, bg)
-        context.fill(panelX + 1, panelY + 2, panelX + PANEL_CORNER, panelY + PANEL_CORNER, bg)
-        // Top-right corner
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + 1, panelX + panelWidth - 2, panelY + 2, bg)
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY + 2, panelX + panelWidth - 1, panelY + PANEL_CORNER, bg)
-        // Bottom-left corner
-        context.fill(panelX + 2, panelY + panelHeight - 2, panelX + PANEL_CORNER, panelY + panelHeight - 1, bg)
-        context.fill(
-            panelX + 1,
-            panelY + panelHeight - PANEL_CORNER,
-            panelX + PANEL_CORNER,
-            panelY + panelHeight - 2,
-            bg
-        )
-        // Bottom-right corner
-        context.fill(
-            panelX + panelWidth - PANEL_CORNER,
-            panelY + panelHeight - 2,
-            panelX + panelWidth - 2,
-            panelY + panelHeight - 1,
-            bg
-        )
-        context.fill(
-            panelX + panelWidth - PANEL_CORNER,
-            panelY + panelHeight - PANEL_CORNER,
-            panelX + panelWidth - 1,
-            panelY + panelHeight - 2,
-            bg
-        )
-
-        // Draw border - top
-        context.fill(panelX + PANEL_CORNER, panelY, panelX + panelWidth - PANEL_CORNER, panelY + 1, border)
-        // Draw border - bottom
-        context.fill(
-            panelX + PANEL_CORNER,
-            panelY + panelHeight - 1,
-            panelX + panelWidth - PANEL_CORNER,
-            panelY + panelHeight,
-            border
-        )
-        // Draw border - left
-        context.fill(panelX, panelY + PANEL_CORNER, panelX + 1, panelY + panelHeight - PANEL_CORNER, border)
-        // Draw border - right
-        context.fill(
-            panelX + panelWidth - 1,
-            panelY + PANEL_CORNER,
-            panelX + panelWidth,
-            panelY + panelHeight - PANEL_CORNER,
-            border
-        )
-
-        // Draw rounded corner borders (curved edges)
-        // Top-left
-        context.fill(panelX + 2, panelY, panelX + PANEL_CORNER, panelY + 1, border)
-        context.fill(panelX + 1, panelY + 1, panelX + 2, panelY + 2, border)
-        context.fill(panelX, panelY + 2, panelX + 1, panelY + PANEL_CORNER, border)
-        // Top-right
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY, panelX + panelWidth - 2, panelY + 1, border)
-        context.fill(panelX + panelWidth - 2, panelY + 1, panelX + panelWidth - 1, panelY + 2, border)
-        context.fill(panelX + panelWidth - 1, panelY + 2, panelX + panelWidth, panelY + PANEL_CORNER, border)
-        // Bottom-left
-        context.fill(panelX + 2, panelY + panelHeight - 1, panelX + PANEL_CORNER, panelY + panelHeight, border)
-        context.fill(panelX + 1, panelY + panelHeight - 2, panelX + 2, panelY + panelHeight - 1, border)
-        context.fill(panelX, panelY + panelHeight - PANEL_CORNER, panelX + 1, panelY + panelHeight - 2, border)
-        // Bottom-right
-        context.fill(
-            panelX + panelWidth - PANEL_CORNER,
-            panelY + panelHeight - 1,
-            panelX + panelWidth - 2,
-            panelY + panelHeight,
-            border
-        )
-        context.fill(
-            panelX + panelWidth - 2,
-            panelY + panelHeight - 2,
-            panelX + panelWidth - 1,
-            panelY + panelHeight - 1,
-            border
-        )
-        context.fill(
-            panelX + panelWidth - 1,
-            panelY + panelHeight - PANEL_CORNER,
-            panelX + panelWidth,
-            panelY + panelHeight - 2,
-            border
-        )
-    }
-
-    /**
-     * Draw corner overlays AFTER models to ensure rounded corners appear on top of any model overflow.
-     * Uses z-translate to render in front of 3D Pokemon models.
-     */
-    private fun drawPanelCornerOverlays(context: DrawContext, x: Int, y: Int, teamSize: Int) {
-        if (teamSize <= 0) return
-
-        val (panelWidth, panelHeight) = calculatePanelDimensions(teamSize)
-
-        val panelX = x - PANEL_PADDING_H
-        val panelY = y - PANEL_PADDING_V
-
-        // Apply opacity for minimized state
-        val border = applyOpacity(PANEL_BORDER)
-
-        val matrices = context.matrices
-        matrices.push()
-        // Push z-level forward to render on top of 3D models
-        matrices.translate(0.0, 0.0, 200.0)
-
-        // Redraw rounded corner borders to overlay any model bleed
-        // Top-left
-        context.fill(panelX + 2, panelY, panelX + PANEL_CORNER, panelY + 1, border)
-        context.fill(panelX + 1, panelY + 1, panelX + 2, panelY + 2, border)
-        context.fill(panelX, panelY + 2, panelX + 1, panelY + PANEL_CORNER, border)
-        // Top-right
-        context.fill(panelX + panelWidth - PANEL_CORNER, panelY, panelX + panelWidth - 2, panelY + 1, border)
-        context.fill(panelX + panelWidth - 2, panelY + 1, panelX + panelWidth - 1, panelY + 2, border)
-        context.fill(panelX + panelWidth - 1, panelY + 2, panelX + panelWidth, panelY + PANEL_CORNER, border)
-        // Bottom-left
-        context.fill(panelX + 2, panelY + panelHeight - 1, panelX + PANEL_CORNER, panelY + panelHeight, border)
-        context.fill(panelX + 1, panelY + panelHeight - 2, panelX + 2, panelY + panelHeight - 1, border)
-        context.fill(panelX, panelY + panelHeight - PANEL_CORNER, panelX + 1, panelY + panelHeight - 2, border)
-        // Bottom-right
-        context.fill(
-            panelX + panelWidth - PANEL_CORNER,
-            panelY + panelHeight - 1,
-            panelX + panelWidth - 2,
-            panelY + panelHeight,
-            border
-        )
-        context.fill(
-            panelX + panelWidth - 2,
-            panelY + panelHeight - 2,
-            panelX + panelWidth - 1,
-            panelY + panelHeight - 1,
-            border
-        )
-        context.fill(
-            panelX + panelWidth - 1,
-            panelY + panelHeight - PANEL_CORNER,
-            panelX + panelWidth,
-            panelY + panelHeight - 2,
-            border
-        )
-
-        matrices.pop()
-    }
-
-    /**
-     * Draw a small help icon ("?") in the corner of the panel.
-     * Returns the bounds of the icon for hover detection.
-     */
     private fun drawHelpIcon(
-        context: DrawContext,
-        panelX: Int,
-        panelY: Int,
-        panelWidth: Int,
-        panelHeight: Int,
-        isLeftSide: Boolean
-    ): TooltipBoundsData {
-        val mc = MinecraftClient.getInstance()
-        val mouseX = (mc.mouse.x * mc.window.scaledWidth / mc.window.width).toInt()
-        val mouseY = (mc.mouse.y * mc.window.scaledHeight / mc.window.height).toInt()
-
-        // Position in bottom-right corner for left panel, bottom-left for right panel
-        val iconX = if (isLeftSide) {
-            panelX + panelWidth - HELP_ICON_SIZE - HELP_ICON_MARGIN
-        } else {
-            panelX + HELP_ICON_MARGIN
-        }
-        val iconY = panelY + panelHeight - HELP_ICON_SIZE - HELP_ICON_MARGIN
-
-        val bounds = TooltipBoundsData(iconX, iconY, HELP_ICON_SIZE, HELP_ICON_SIZE)
-
-        // Check if hovered
-        val isHovered = mouseX >= iconX && mouseX <= iconX + HELP_ICON_SIZE &&
-            mouseY >= iconY && mouseY <= iconY + HELP_ICON_SIZE
-
-        // Colors - more visible when hovered
-        val bgColor = if (isHovered) color(70, 85, 105, 230) else color(45, 55, 70, 180)
-        val borderColor = if (isHovered) color(100, 120, 150, 255) else color(70, 80, 100, 200)
-        val textColor = if (isHovered) color(240, 245, 250, 255) else color(140, 155, 175, 220)
-
-        val matrices = context.matrices
-        matrices.push()
-        matrices.translate(0.0, 0.0, 250.0)  // Above panel, below tooltips
-
-        // Draw circular background (8x8 pixel circle approximation)
-        // Center rows (full width)
-        val bg = applyOpacity(bgColor)
-        context.fill(iconX, iconY + 2, iconX + HELP_ICON_SIZE, iconY + 6, bg)
-        // Top/bottom rows (narrower for rounded look)
-        context.fill(iconX + 1, iconY + 1, iconX + HELP_ICON_SIZE - 1, iconY + 2, bg)
-        context.fill(iconX + 1, iconY + 6, iconX + HELP_ICON_SIZE - 1, iconY + 7, bg)
-        context.fill(iconX + 2, iconY, iconX + HELP_ICON_SIZE - 2, iconY + 1, bg)
-        context.fill(iconX + 2, iconY + 7, iconX + HELP_ICON_SIZE - 2, iconY + 8, bg)
-
-        // Draw circular border for definition
-        val border = applyOpacity(borderColor)
-        // Top edge
-        context.fill(iconX + 2, iconY, iconX + HELP_ICON_SIZE - 2, iconY + 1, border)
-        // Bottom edge
-        context.fill(iconX + 2, iconY + HELP_ICON_SIZE - 1, iconX + HELP_ICON_SIZE - 2, iconY + HELP_ICON_SIZE, border)
-        // Left edge
-        context.fill(iconX, iconY + 2, iconX + 1, iconY + HELP_ICON_SIZE - 2, border)
-        // Right edge
-        context.fill(iconX + HELP_ICON_SIZE - 1, iconY + 2, iconX + HELP_ICON_SIZE, iconY + HELP_ICON_SIZE - 2, border)
-        // Corner pixels for smooth curve
-        context.fill(iconX + 1, iconY + 1, iconX + 2, iconY + 2, border)
-        context.fill(iconX + HELP_ICON_SIZE - 2, iconY + 1, iconX + HELP_ICON_SIZE - 1, iconY + 2, border)
-        context.fill(iconX + 1, iconY + HELP_ICON_SIZE - 2, iconX + 2, iconY + HELP_ICON_SIZE - 1, border)
-        context.fill(iconX + HELP_ICON_SIZE - 2, iconY + HELP_ICON_SIZE - 2, iconX + HELP_ICON_SIZE - 1, iconY + HELP_ICON_SIZE - 1, border)
-
-        // Draw "?" text centered in the circle
-        val helpText = "?"
-        val textRenderer = mc.textRenderer
-        val textScale = 0.7f
-        val textWidth = textRenderer.getWidth(helpText) * textScale
-        val textHeight = textRenderer.fontHeight * textScale
-        // Center precisely with manual adjustments for Minecraft's text rendering offset
-        val textX = iconX + (HELP_ICON_SIZE / 2.0f) - (textWidth / 2.0f) + 0.5f
-        val textY = iconY + (HELP_ICON_SIZE / 2.0f) - (textHeight / 2.0f) + 1.0f
-
-        drawScaledText(
-            context = context,
-            text = Text.literal(helpText),
-            x = textX,
-            y = textY,
-            colour = applyOpacity(textColor),
-            scale = textScale,
-            shadow = false
-        )
-
-        matrices.pop()
-
-        return bounds
-    }
+        context: DrawContext, panelX: Int, panelY: Int, panelWidth: Int, panelHeight: Int, isLeftSide: Boolean
+    ): TooltipBoundsData =
+        TeamPanelRenderer.drawHelpIcon(context, panelX, panelY, panelWidth, panelHeight, isLeftSide, ::applyOpacity)
 
     /**
      * Render a team using battle actor's pokemon list.
@@ -2134,213 +1334,16 @@ object TeamIndicatorUI {
         if (isLeftSide) leftHelpIconBounds = helpBounds else rightHelpIconBounds = helpBounds
     }
 
-    private fun getStatusColor(status: Status): Int {
-        return when (status) {
-            Statuses.POISON, Statuses.POISON_BADLY -> COLOR_POISON
-            Statuses.BURN -> COLOR_BURN
-            Statuses.PARALYSIS -> COLOR_PARALYSIS
-            Statuses.FROZEN -> COLOR_FREEZE
-            Statuses.SLEEP -> COLOR_SLEEP
-            else -> COLOR_NORMAL_TOP
-        }
-    }
-
-    private fun drawPokeball(
-        context: DrawContext,
-        x: Int,
-        y: Int,
-        topColor: Int,
-        bottomColor: Int,
-        bandColor: Int,
-        centerColor: Int
-    ) {
-        val halfSize = BALL_SIZE / 2
-        val centerSize = 4
-        val centerOffset = (BALL_SIZE - centerSize) / 2
-
-        // Apply opacity for minimized state
-        val top = applyOpacity(topColor)
-        val bottom = applyOpacity(bottomColor)
-        val band = applyOpacity(bandColor)
-        val center = applyOpacity(centerColor)
-
-        // Top half (status/normal color)
-        context.fill(x + 1, y, x + BALL_SIZE - 1, y + halfSize, top)
-        context.fill(x, y + 1, x + BALL_SIZE, y + halfSize, top)
-
-        // Bottom half (white/gray)
-        context.fill(x + 1, y + halfSize, x + BALL_SIZE - 1, y + BALL_SIZE, bottom)
-        context.fill(x, y + halfSize, x + BALL_SIZE, y + BALL_SIZE - 1, bottom)
-
-        // Center band
-        context.fill(x, y + halfSize - 1, x + BALL_SIZE, y + halfSize + 1, band)
-
-        // Center button
-        context.fill(
-            x + centerOffset,
-            y + centerOffset,
-            x + centerOffset + centerSize,
-            y + centerOffset + centerSize,
-            center
-        )
-        // Button outline
-        context.fill(x + centerOffset, y + centerOffset, x + centerOffset + centerSize, y + centerOffset + 1, band)
-        context.fill(
-            x + centerOffset,
-            y + centerOffset + centerSize - 1,
-            x + centerOffset + centerSize,
-            y + centerOffset + centerSize,
-            band
-        )
-        context.fill(x + centerOffset, y + centerOffset, x + centerOffset + 1, y + centerOffset + centerSize, band)
-        context.fill(
-            x + centerOffset + centerSize - 1,
-            y + centerOffset,
-            x + centerOffset + centerSize,
-            y + centerOffset + centerSize,
-            band
-        )
-    }
-
-    private data class Quad<T>(val first: T, val second: T, val third: T, val fourth: T)
-
-    /**
-     * RGBA color tint for model rendering.
-     */
-    private data class ColorTint(val r: Float, val g: Float, val b: Float, val a: Float)
-
-    /**
-     * Get RGBA tint values for Pokemon model based on status/KO state.
-     * KO takes priority over status.
-     */
-    private fun getModelTint(isKO: Boolean, status: Status?): ColorTint {
-        if (isKO) return ColorTint(0.4f, 0.4f, 0.4f, 0.7f)
-        return when (status) {
-            Statuses.POISON, Statuses.POISON_BADLY -> ColorTint(0.7f, 0.4f, 0.9f, 1f)
-            Statuses.BURN -> ColorTint(1f, 0.5f, 0.2f, 1f)
-            Statuses.PARALYSIS -> ColorTint(1f, 0.9f, 0.3f, 1f)
-            Statuses.FROZEN -> ColorTint(0.4f, 0.8f, 1f, 1f)
-            Statuses.SLEEP -> ColorTint(0.6f, 0.6f, 0.7f, 1f)
-            else -> ColorTint(1f, 1f, 1f, 1f)
-        }
-    }
-
-    /**
-     * Draw a Pokemon model at the specified position.
-     * Falls back to pokeball rendering if model fails to load.
-     */
+    // Model rendering delegated to PokemonModelRenderer
     private fun drawPokemonModel(
-        context: DrawContext,
-        x: Int,
-        y: Int,
-        renderablePokemon: RenderablePokemon?,
-        speciesIdentifier: Identifier?,
-        aspects: Set<String>,
-        uuid: UUID,
-        isKO: Boolean,
-        status: Status?,
-        isLeftSide: Boolean
-    ) {
-        val matrixStack = context.matrices
-        val state = getOrCreateFloatingState(uuid)
-
-        // Set aspects on state for proper form rendering
-        if (renderablePokemon != null) {
-            state.currentAspects = renderablePokemon.aspects
-        } else if (aspects.isNotEmpty()) {
-            state.currentAspects = aspects
-        }
-
-        // Get tint colors
-        val tint = getModelTint(isKO, status)
-
-        // Calculate center position for model (centered in bounds)
-        val centerX = x + modelSize / 2.0
-        val centerY = y + modelSize / 2.0
-
-        // PC-style rotation with slight tilt, facing towards center
-        // Left side Pokemon look RIGHT (towards center): negative Y rotation
-        // Right side Pokemon look LEFT (towards center): positive Y rotation
-        val yRotation = if (isLeftSide) -35f else 35f
-        val rotation = Quaternionf().rotationXYZ(
-            Math.toRadians(13.0).toFloat(),   // X tilt (forward lean like PC)
-            Math.toRadians(yRotation.toDouble()).toFloat(),  // Y rotation (face center)
-            0f
-        )
-
-        // Scale to fit in modelSize (scaled)
-        val scale = modelSize / 3.0f
-
-        matrixStack.push()
-        try {
-            // Models render downward from translation point, so position near top of bounds
-            // to have the model fill the space and appear vertically centered
-            val renderY = y + modelSize * 0.1  // Position at ~10% from top
-            matrixStack.translate(centerX, renderY, 0.0)
-
-            if (renderablePokemon != null) {
-                // Player's Pokemon - use full RenderablePokemon
-                drawProfilePokemon(
-                    renderablePokemon = renderablePokemon,
-                    matrixStack = matrixStack,
-                    rotation = rotation,
-                    poseType = PoseType.PORTRAIT,
-                    state = state,
-                    partialTicks = 0f,  // Static pose
-                    scale = scale,
-                    r = tint.r, g = tint.g, b = tint.b, a = tint.a
-                )
-            } else if (speciesIdentifier != null) {
-                // Opponent's Pokemon - use species identifier
-                drawProfilePokemon(
-                    species = speciesIdentifier,
-                    matrixStack = matrixStack,
-                    rotation = rotation,
-                    poseType = PoseType.PORTRAIT,
-                    state = state,
-                    partialTicks = 0f,  // Static pose
-                    scale = scale,
-                    r = tint.r, g = tint.g, b = tint.b, a = tint.a
-                )
-            } else {
-                // No model data - draw fallback pokeball
-                matrixStack.pop()
-                drawPokeballFallback(context, x, y, isKO, status)
-                return
-            }
-        } catch (e: Exception) {
-            // Model rendering failed - draw fallback pokeball
-            CobblemonExtendedBattleUI.LOGGER.debug("Failed to render Pokemon model: ${e.message}")
-            matrixStack.pop()
-            drawPokeballFallback(context, x, y, isKO, status)
-            return
-        }
-        matrixStack.pop()
-    }
-
-    /**
-     * Draw a pokeball as fallback when model rendering fails.
-     * Uses the original pokeball rendering but centered in the scaled model space.
-     */
-    private fun drawPokeballFallback(context: DrawContext, x: Int, y: Int, isKO: Boolean, status: Status?) {
-        // Scale ball size proportionally
-        val scaledBallSize = (BALL_SIZE * PanelConfig.teamIndicatorScale).toInt()
-        // Center the pokeball in the model space
-        val offsetX = x + (modelSize - scaledBallSize) / 2
-        val offsetY = y + (modelSize - scaledBallSize) / 2
-
-        val colors = when {
-            isKO -> Quad(COLOR_KO_TOP, COLOR_KO_BOTTOM, COLOR_KO_BAND, COLOR_KO_CENTER)
-            status != null -> {
-                val statusColor = getStatusColor(status)
-                Quad(statusColor, COLOR_NORMAL_BOTTOM, COLOR_NORMAL_BAND, COLOR_NORMAL_CENTER)
-            }
-
-            else -> Quad(COLOR_NORMAL_TOP, COLOR_NORMAL_BOTTOM, COLOR_NORMAL_BAND, COLOR_NORMAL_CENTER)
-        }
-
-        drawPokeball(context, offsetX, offsetY, colors.first, colors.second, colors.third, colors.fourth)
-    }
+        context: DrawContext, x: Int, y: Int,
+        renderablePokemon: com.cobblemon.mod.common.pokemon.RenderablePokemon?,
+        speciesIdentifier: Identifier?, aspects: Set<String>,
+        uuid: UUID, isKO: Boolean, status: Status?, isLeftSide: Boolean
+    ) = PokemonModelRenderer.drawPokemonModel(
+        context, x, y, modelSize, renderablePokemon, speciesIdentifier, aspects,
+        uuid, isKO, status, isLeftSide, ::applyOpacity, PanelConfig.teamIndicatorScale
+    )
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Tooltip Rendering (called from BattleInfoRenderer after all other UI)
@@ -2397,9 +1400,6 @@ object TeamIndicatorUI {
         return null
     }
 
-    /**
-     * Check if the team indicators are in their default state.
-     */
     private fun isInDefaultState(isLeftSide: Boolean): Boolean {
         val hasDefaultOrientation = PanelConfig.teamIndicatorOrientation == PanelConfig.TeamIndicatorOrientation.HORIZONTAL
         val hasDefaultScale = PanelConfig.teamIndicatorScale == 1.0f
@@ -2411,104 +1411,14 @@ object TeamIndicatorUI {
         return hasDefaultOrientation && hasDefaultScale && hasDefaultPosition
     }
 
-    /**
-     * Render control hints below the panel when hovering the background.
-     */
     private fun renderControlHints(context: DrawContext, panelInfo: Pair<TooltipBoundsData, Boolean>) {
         val (bounds, isLeftSide) = panelInfo
-        val mc = MinecraftClient.getInstance()
-        val textRenderer = mc.textRenderer
-        val screenWidth = mc.window.scaledWidth
-        val screenHeight = mc.window.scaledHeight
-
-        // Hint text segments with separators
-        val isCustomized = !isInDefaultState(isLeftSide)
-        val repositioningEnabled = PanelConfig.teamIndicatorRepositioningEnabled
-
-        val hints = buildList {
-            add(Pair("Shift+Click", ": Flip"))
-            add(Pair("  •  ", ""))
-            if (repositioningEnabled) {
-                add(Pair("Drag", ": Move"))
-                add(Pair("  •  ", ""))
-                add(Pair("Dbl-Click", ": Reset"))
-                add(Pair("  •  ", ""))
-            }
-            add(Pair("Ctrl+Scroll", ": Scale"))
-            add(Pair("  •  ", ""))
-            add(Pair("Alt", ": Both"))
-        }
-
-        // Calculate dimensions
-        val hintScale = 0.7f
-        val hintText = hints.joinToString("") { it.first + it.second }
-        val hintWidth = (textRenderer.getWidth(hintText) * hintScale).toInt() + 8
-        val hintHeight = (textRenderer.fontHeight * hintScale).toInt() + 4
-
-        // Position below the panel, centered
-        var hintX = bounds.x + (bounds.width / 2) - (hintWidth / 2)
-        var hintY = bounds.y + bounds.height + 2
-
-        // Clamp to screen bounds
-        hintX = hintX.coerceIn(2, screenWidth - hintWidth - 2)
-        if (hintY + hintHeight > screenHeight - 2) {
-            // Show above panel if not enough space below
-            hintY = bounds.y - hintHeight - 2
-        }
-
-        // Colors
-        val bgColor = color(15, 20, 25, 200)
-        val borderColor = color(50, 60, 70, 200)
-        val keyColor = if (isCustomized) color(180, 200, 140, 255) else color(140, 160, 180, 255)
-        val textColor = color(100, 110, 120, 255)
-        val separatorColor = color(70, 80, 90, 255)
-
-        val matrices = context.matrices
-        matrices.push()
-        matrices.translate(0.0, 0.0, 400.0)
-
-        // Draw background
-        context.fill(hintX, hintY, hintX + hintWidth, hintY + hintHeight, applyOpacity(bgColor))
-        // Draw border (top and bottom lines only for subtle look)
-        context.fill(hintX, hintY, hintX + hintWidth, hintY + 1, applyOpacity(borderColor))
-        context.fill(hintX, hintY + hintHeight - 1, hintX + hintWidth, hintY + hintHeight, applyOpacity(borderColor))
-
-        // Draw hint text
-        var textX = (hintX + 4).toFloat()
-        val textY = (hintY + 2).toFloat()
-
-        for ((key, action) in hints) {
-            val color = when {
-                key.contains("•") -> separatorColor
-                action.isEmpty() -> separatorColor
-                else -> keyColor
-            }
-            drawScaledText(
-                context = context,
-                text = Text.literal(key),
-                x = textX,
-                y = textY,
-                colour = applyOpacity(color),
-                scale = hintScale,
-                shadow = false
-            )
-            textX += textRenderer.getWidth(key) * hintScale
-
-            if (action.isNotEmpty()) {
-                drawScaledText(
-                    context = context,
-                    text = Text.literal(action),
-                    x = textX,
-                    y = textY,
-                    colour = applyOpacity(textColor),
-                    scale = hintScale,
-                    shadow = false
-                )
-                textX += textRenderer.getWidth(action) * hintScale
-            }
-        }
-
-        matrices.pop()
+        TeamPanelRenderer.renderControlHints(
+            context, bounds, isLeftSide,
+            !isInDefaultState(isLeftSide),
+            PanelConfig.teamIndicatorRepositioningEnabled,
+            ::applyOpacity
+        )
     }
 
     private fun getBattlePokemonByUuid(
@@ -2523,39 +1433,7 @@ object TeamIndicatorUI {
         return null
     }
 
-    /**
-     * Get ClientBattlePokemon by UUID (used to access level and species from properties).
-     */
-    private fun getClientBattlePokemonByUuid(uuid: UUID): ClientBattlePokemon? {
-        val battle = CobblemonClient.battle ?: return null
-        for (side in listOf(battle.side1, battle.side2)) {
-            for (actor in side.actors) {
-                for (active in actor.activePokemon) {
-                    active.battlePokemon?.let {
-                        if (it.uuid == uuid) return it
-                    }
-                }
-            }
-        }
-        return null
-    }
-
-    private fun getPokemonNameFromUuid(uuid: UUID): String? {
-        val battle = CobblemonClient.battle ?: return null
-        for (side in listOf(battle.side1, battle.side2)) {
-            for (actor in side.actors) {
-                for (pokemon in actor.pokemon) {
-                    if (pokemon.uuid == uuid) return pokemon.getDisplayName().string
-                }
-                for (active in actor.activePokemon) {
-                    active.battlePokemon?.let {
-                        if (it.uuid == uuid) return it.displayName.string
-                    }
-                }
-            }
-        }
-        return null
-    }
+    // getClientBattlePokemonByUuid and getPokemonNameFromUuid moved to TooltipDataBuilder
 
     private fun getTooltipData(
         uuid: UUID,
@@ -2563,252 +1441,23 @@ object TeamIndicatorUI {
         battlePokemon: Pokemon?,
         isPlayerPokemon: Boolean
     ): TooltipData {
-        val pokemonId = trackedPokemon?.speciesIdentifier
-            ?: battlePokemon?.species?.resourceIdentifier
-        val name = battlePokemon?.getDisplayName()?.string
-            ?: getPokemonNameFromUuid(uuid)
-            ?: trackedPokemon?.displayName
-            ?: "Unknown"
-
-        val hpPercent = trackedPokemon?.hpPercent
-            ?: battlePokemon?.let {
-                if (it.maxHealth > 0) it.currentHealth.toFloat() / it.maxHealth else 0f
-            }
-            ?: 0f
-
-        // Get ClientBattlePokemon for level and species info
-        val clientBattlePokemon = getClientBattlePokemonByUuid(uuid)
-
-        // Get level: from ClientBattlePokemon properties, or from Pokemon object for player's own
-        val level: Int? = clientBattlePokemon?.properties?.level
-            ?: battlePokemon?.level
-
-        // Get species name: from tracked data, ClientBattlePokemon, or Pokemon object
-        val speciesName: String? = trackedPokemon?.speciesIdentifier?.path
-            ?: clientBattlePokemon?.properties?.species
-            ?: battlePokemon?.species?.name
-
-        // For player's own Pokemon, show ALL moves and item directly from Pokemon data
-        // For opponent/spectated Pokemon, only show revealed moves and tracked items
-        val moves: List<MoveInfo>
-        val item: BattleStateTracker.TrackedItem?
-        val actualSpeed: Int?
-        val actualDefence: Int?
-        val actualSpecialDefence: Int?
-        val actualAttack: Int?
-        val actualSpecialAttack: Int?
-        val abilityName: String?
-        val possibleAbilities: List<String>?
-
-        if (isPlayerPokemon && battlePokemon != null) {
-            // Use tracked PP (which updates when moves are used) - initialized in render()
-            val trackedMoves = BattleStateTracker.getTrackedMoves(uuid)
-            moves = if (trackedMoves != null) {
-                trackedMoves.map { MoveInfo(it.name, currentPp = it.currentPp, maxPp = it.maxPp) }
-            } else {
-                // Fallback to Pokemon data if tracking not initialized
-                battlePokemon.moveSet.getMoves().map {
-                    MoveInfo(it.displayName.string, currentPp = it.currentPp, maxPp = it.maxPp)
-                }
-            }
-            // Player's Pokemon: show actual held item (if any)
-            val heldItem = battlePokemon.heldItem()
-            val trackedItem = BattleStateTracker.getItem(uuid)
-            item = if (trackedItem != null) {
-                // We have tracked item info - use it
-                // This handles: consumed items, knocked off items, AND items changed via Trick
-                // (game's heldItem() may not update mid-battle after Trick)
-                if (trackedItem.status != BattleStateTracker.ItemStatus.HELD) {
-                    trackedItem  // Item was consumed/knocked off/swapped away
-                } else if (!heldItem.isEmpty && heldItem.name.string != trackedItem.name) {
-                    // Game shows different item than our tracking - our tracking is more recent (Trick swap)
-                    trackedItem
-                } else if (!heldItem.isEmpty) {
-                    // Same item - use game data with our status
-                    BattleStateTracker.TrackedItem(
-                        heldItem.name.string,
-                        BattleStateTracker.ItemStatus.HELD,
-                        BattleStateTracker.currentTurn
-                    )
-                } else {
-                    // No item in game but we have tracking - Pokemon lost item (shouldn't happen but handle it)
-                    trackedItem
-                }
-            } else if (!heldItem.isEmpty) {
-                // No tracking but has item - just show the held item
-                BattleStateTracker.TrackedItem(
-                    heldItem.name.string,
-                    BattleStateTracker.ItemStatus.HELD,
-                    BattleStateTracker.currentTurn
-                )
-            } else {
-                // No item and no tracking
-                null
-            }
-            // Get actual speed stat and ability for player's Pokemon
-            actualSpeed = battlePokemon.speed
-            actualDefence = battlePokemon.defence
-            actualSpecialDefence = battlePokemon.specialDefence
-            actualAttack = battlePokemon.attack
-            actualSpecialAttack = battlePokemon.specialAttack
-
-            // For transformed Pokemon (e.g., Ditto), use the copied ability, not the original
-            val isTransformed = trackedPokemon?.isTransformed == true || BattleStateTracker.isTransformed(uuid)
-            val copiedAbility = if (isTransformed) BattleStateTracker.getRevealedAbility(uuid) else null
-
-            if (copiedAbility != null) {
-                // Use the copied ability for transformed Pokemon
-                abilityName = copiedAbility
-            } else {
-                // Normal case: format the ability name from Pokemon data
-                val rawAbilityName = battlePokemon.ability.name
-                val translatedAbility = Text.translatable("cobblemon.ability.$rawAbilityName").string
-                abilityName = if (translatedAbility.startsWith("cobblemon.") || translatedAbility == rawAbilityName) {
-                    formatAbilityName(rawAbilityName)
-                } else {
-                    translatedAbility
-                }
-            }
-            possibleAbilities = null  // Player knows their own ability
-        } else {
-            // Opponent/spectated: show revealed moves with estimated PP (assumes PP Max)
-            moves = BattleStateTracker.getRevealedMoves(uuid).map { moveName ->
-                val usageCount = BattleStateTracker.getMoveUsageCount(uuid, moveName)
-                // Look up base PP from move template (try lowercase for registry lookup)
-                val basePp = Moves.getByName(moveName.lowercase().replace(" ", ""))?.pp
-                    ?: Moves.getByName(moveName)?.pp
-                if (basePp != null) {
-                    // Assume PP Max (base * 8/5) for competitive Pokemon
-                    val estimatedMax = basePp * 8 / 5
-                    val estimatedRemaining = (estimatedMax - usageCount).coerceAtLeast(0)
-                    MoveInfo(moveName, estimatedRemaining = estimatedRemaining, estimatedMax = estimatedMax)
-                } else {
-                    // Unknown move - just show usage count
-                    MoveInfo(moveName, usageCount = usageCount)
-                }
-            }
-            item = BattleStateTracker.getItem(uuid)
-            actualSpeed = null  // Can't know opponent's actual speed
-            actualDefence = null
-            actualSpecialDefence = null
-            actualAttack = null
-            actualSpecialAttack = null
-            // Check if ability was revealed during battle
-            val revealedAbility = BattleStateTracker.getRevealedAbility(uuid)
-            if (revealedAbility != null) {
-                abilityName = revealedAbility
-                possibleAbilities = null  // Ability is known, no need for possibilities
-            } else {
-                // Ability not yet revealed - show possible abilities from species
-                abilityName = null
-                possibleAbilities = trackedPokemon?.form?.abilities?.mapNotNull { potentialAbility ->
-                    // Try translation first, fall back to formatting the ID
-                    val translated = Text.translatable(potentialAbility.template.displayName).string
-                    val abilityId = potentialAbility.template.name
-
-                    // If translation failed (returned key or looks like untranslated ID), format manually
-                    if (translated.startsWith("cobblemon.") || translated == abilityId) {
-                        formatAbilityName(abilityId)
-                    } else {
-                        translated
-                    }
-                }
-            }
-        }
-
-        // Get types from species (name must be lowercase for registry lookup)
-        val species = if (trackedPokemon?.speciesIdentifier != null) PokemonSpecies.getByIdentifier(trackedPokemon.speciesIdentifier!!)
-        else if (battlePokemon != null) PokemonSpecies.getByIdentifier(battlePokemon.species.resourceIdentifier)
-        else null
-
-        // Check for form change state and look up form-specific FormData
-        val currentFormState = BattleStateTracker.getCurrentForm(uuid)
-        val effectiveForm: FormData? = if (currentFormState != null && species != null) {
-            // Form change active - look up form-specific data
-            val aspect = BattleStateTracker.formNameToAspect(currentFormState.currentForm)
-            species.getForm(setOf(aspect))
-        } else {
-            // No form change - use tracked form or battlePokemon's form
-            trackedPokemon?.form ?: battlePokemon?.form
-        }
-
-        // Check for dynamic type state (type changes from moves like Soak, Burn Up, Trick-or-Treat)
-        val dynamicTypeState = BattleStateTracker.getDynamicTypes(uuid)
-        val lostPrimaryType: Boolean
-        val addedTypes: List<String>
-        val primaryType: ElementalType?
-        val secondaryType: ElementalType?
-
-        if (dynamicTypeState != null) {
-            // Use dynamic types when available
-            lostPrimaryType = dynamicTypeState.hasLostPrimaryType
-            addedTypes = dynamicTypeState.addedTypes
-
-            CobblemonExtendedBattleUI.LOGGER.debug(
-                "TeamIndicatorUI: Dynamic types for $name - hasLostPrimary=${dynamicTypeState.hasLostPrimaryType}, " +
-                "primary=${dynamicTypeState.primaryType}, secondary=${dynamicTypeState.secondaryType}"
+        // Convert TrackedPokemon to snapshot for TooltipDataBuilder
+        val snapshot = trackedPokemon?.let { tp ->
+            TooltipDataBuilder.TrackedPokemonSnapshot(
+                speciesIdentifier = tp.speciesIdentifier,
+                displayName = tp.displayName,
+                hpPercent = tp.hpPercent,
+                status = tp.status,
+                isKO = tp.isKO,
+                isTransformed = tp.isTransformed,
+                form = tp.form,
+                teraType = tp.teraType,
+                formAbilities = tp.form?.abilities?.map { ability ->
+                    TooltipDataBuilder.AbilityInfo(ability.template.name, ability.template.displayName)
+                } ?: emptyList()
             )
-
-            // Convert type name strings to ElementalType
-            primaryType = dynamicTypeState.primaryType?.let {
-                ElementalTypes.get(it.lowercase())
-            }
-            secondaryType = dynamicTypeState.secondaryType?.let {
-                ElementalTypes.get(it.lowercase())
-            }
-        } else {
-            // No dynamic state - use effectiveForm types (form-aware)
-            lostPrimaryType = false
-            addedTypes = emptyList()
-
-            primaryType = if (battlePokemon != null && currentFormState == null) battlePokemon.form.primaryType
-            else {
-                effectiveForm?.primaryType ?: species?.primaryType
-            }
-
-            secondaryType = if (battlePokemon != null && currentFormState == null) battlePokemon.form.secondaryType
-            else {
-                effectiveForm?.secondaryType ?: species?.secondaryType
-            }
         }
-
-        val teraType = if (battlePokemon != null) battlePokemon.teraType
-        else trackedPokemon?.teraType
-
-        // Check if this Pokemon is ACTIVELY Terastallized (from battle message tracking)
-        val activeTeraTypeName = BattleStateTracker.getTeraType(uuid)
-        val isTerastallized = activeTeraTypeName != null
-
-        return TooltipData(
-            uuid = uuid,
-            pokemonName = name,
-            pokemonId = pokemonId,
-            hpPercent = hpPercent,
-            statusCondition = trackedPokemon?.status ?: battlePokemon?.status?.status,
-            isKO = trackedPokemon?.isKO ?: isPokemonKO(uuid),
-            moves = moves,
-            item = item,
-            statChanges = BattleStateTracker.getStatChanges(uuid),
-            volatileStatuses = BattleStateTracker.getVolatileStatuses(uuid),
-            level = level,
-            speciesName = speciesName,
-            isPlayerPokemon = isPlayerPokemon,
-            actualSpeed = actualSpeed,
-            actualDefence = actualDefence,
-            actualSpecialDefence = actualSpecialDefence,
-            actualAttack = actualAttack,
-            actualSpecialAttack = actualSpecialAttack,
-            abilityName = abilityName,
-            possibleAbilities = possibleAbilities,
-            primaryType = primaryType,
-            secondaryType = secondaryType,
-            teraType = teraType,
-            form = effectiveForm,
-            lostPrimaryType = lostPrimaryType,
-            addedTypes = addedTypes,
-            isTerastallized = isTerastallized,
-            activeTeraTypeName = activeTeraTypeName
-        )
+        return TooltipDataBuilder.buildTooltipData(uuid, snapshot, battlePokemon, isPlayerPokemon, ::isPokemonKO)
     }
 
     private fun renderTooltip(context: DrawContext, bounds: PokeballBounds, data: TooltipData) {
@@ -2822,16 +1471,6 @@ object TeamIndicatorUI {
 
         // Store tooltip bounds for input handling
         tooltipBounds = result
-    }
-
-    /**
-     * Apply stat stage multiplier to a stat value.
-     * Uses the standard Pokemon formula: (2 + stage) / 2 for positive, 2 / (2 - stage) for negative.
-     * Note: For player Pokemon, the input stat already includes nature from Cobblemon.
-     */
-    internal fun applyStageMultiplier(stat: Int, stage: Int): Int {
-        val multiplier = getStageMultiplier(stage)
-        return (stat * multiplier).toInt()
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -2892,26 +1531,6 @@ object TeamIndicatorUI {
         return false
     }
 
-    internal fun getStatusDisplayName(status: Status): String {
-        return when (status) {
-            Statuses.POISON -> Text.translatable("cobblemonextendedbattleui.status.poisoned").string
-            Statuses.POISON_BADLY -> Text.translatable("cobblemonextendedbattleui.status.badly_poisoned").string
-            Statuses.BURN -> Text.translatable("cobblemonextendedbattleui.status.burned").string
-            Statuses.PARALYSIS -> Text.translatable("cobblemonextendedbattleui.status.paralyzed").string
-            Statuses.FROZEN -> Text.translatable("cobblemonextendedbattleui.status.frozen").string
-            Statuses.SLEEP -> Text.translatable("cobblemonextendedbattleui.status.asleep").string
-            else -> status.name.path.replaceFirstChar { it.uppercase() }
-        }
-    }
-
-    internal fun getStatusTextColor(status: Status): Int {
-        return when (status) {
-            Statuses.POISON, Statuses.POISON_BADLY -> color(160, 90, 200)
-            Statuses.BURN -> color(255, 140, 50)
-            Statuses.PARALYSIS -> color(255, 220, 50)
-            Statuses.FROZEN -> color(100, 200, 255)
-            Statuses.SLEEP -> color(150, 150, 170)
-            else -> TOOLTIP_TEXT
-        }
-    }
+    internal fun getStatusDisplayName(status: Status): String = TooltipDataBuilder.getStatusDisplayName(status)
+    internal fun getStatusTextColor(status: Status): Int = TooltipDataBuilder.getStatusTextColor(status)
 }

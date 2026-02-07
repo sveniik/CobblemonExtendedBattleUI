@@ -10,6 +10,11 @@ import net.minecraft.client.gui.DrawContext
 object BattleInfoRenderer {
 
     fun render(context: DrawContext) {
+        // Clear stale move tooltip state when BattleMoveSelection stops rendering.
+        // Must run before panels check shouldHandleFontInput() and before the
+        // F1 early return (otherwise staleness is never detected while HUD is hidden).
+        MoveTooltipRenderer.resetIfStale()
+
         // Respect F1 to hide HUD
         if (MinecraftClient.getInstance().options.hudHidden) return
 

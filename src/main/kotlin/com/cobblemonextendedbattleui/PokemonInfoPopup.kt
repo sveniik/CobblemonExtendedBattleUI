@@ -100,13 +100,13 @@ object PokemonInfoPopup {
             }
             // Vertically centered on the hovered pokeball, clamped to screen
             py = bounds.y + (bounds.height / 2) - (totalHeight / 2)
-            px = px.coerceIn(4, screenWidth - popupWidth - 4)
-            py = py.coerceIn(4, screenHeight - totalHeight - 4)
+            px = px.coerceIn(4, maxOf(4, screenWidth - popupWidth - 4))
+            py = py.coerceIn(4, maxOf(4, screenHeight - totalHeight - 4))
         } else {
             // Horizontal team layout: popup appears below the pokeball
             px = bounds.x + (bounds.width / 2) - (popupWidth / 2)
             py = bounds.y + bounds.height + 4
-            px = px.coerceIn(4, screenWidth - popupWidth - 4)
+            px = px.coerceIn(4, maxOf(4, screenWidth - popupWidth - 4))
             if (py + totalHeight > screenHeight - 4) {
                 py = bounds.y - totalHeight - 4
             }

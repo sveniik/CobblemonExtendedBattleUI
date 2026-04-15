@@ -197,6 +197,7 @@ object UIUtils {
      * Works with both keyboard keys and mouse buttons.
      */
     fun isKeyOrButtonPressed(handle: Long, key: InputUtil.Key): Boolean {
+        if (key == InputUtil.UNKNOWN_KEY) return false
         return when (key.category) {
             InputUtil.Type.MOUSE -> GLFW.glfwGetMouseButton(handle, key.code) == GLFW.GLFW_PRESS
             else -> GLFW.glfwGetKey(handle, key.code) == GLFW.GLFW_PRESS

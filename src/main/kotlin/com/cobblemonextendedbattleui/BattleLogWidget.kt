@@ -179,9 +179,15 @@ object BattleLogWidget {
 
         // Calculate Y from bottom edge (collapse downwards behavior)
         val bottomY = (PanelConfig.logY ?: (defaultBottomY - expandedHeight)) + expandedHeight
-        val y = (bottomY - height).coerceIn(0, screenHeight - height)
-        val x = (PanelConfig.logX ?: defaultX).coerceIn(0, screenWidth - width)
+        val safeHeight = height.coerceAtMost(screenHeight)
+        val safeWidth = width.coerceAtMost(screenWidth)
 
+        val maxY = (screenHeight - safeHeight).coerceAtLeast(0)
+        val maxX = (screenWidth - safeWidth).coerceAtLeast(0)
+
+        val y = (bottomY - safeHeight).coerceIn(0, maxY)
+        val x = (PanelConfig.logX ?: defaultX).coerceIn(0, maxX)
+        
         widgetX = x
         widgetY = y
         widgetW = width

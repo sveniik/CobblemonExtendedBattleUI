@@ -29,7 +29,7 @@ public class BattleMessagePaneMixin {
         cancellable = true
     )
     private void onRenderWidget(DrawContext context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
-        if (PanelConfig.INSTANCE.getEnableBattleLog()) {
+        if (PanelConfig.INSTANCE.getEnableBattleLogEffective()) {
             ci.cancel();
         }
     }

@@ -31,6 +31,10 @@ object PanelConfig {
     var enableBattleLog: Boolean = true
         private set
 
+    // Extra damage/healing percentage lines in the battle log (no effect if enableBattleLog is false)
+    var enableBattleLogDamagePercentages: Boolean = true
+        private set
+
     // Enable/disable move tooltips on Fight menu (shows power, accuracy, effectiveness)
     var enableMoveTooltips: Boolean = true
         private set
@@ -142,6 +146,10 @@ object PanelConfig {
     var showStatRanges: Boolean = true
         private set
 
+    // Show estimated speed range (min–max) for opponent Pokemon in tooltips; label/stage always shown
+    var showOpponentSpeedRange: Boolean = true
+        private set
+
     // Show base crit rate in move tooltips (even when not boosted)
     // Disabled by default due to noisiness.
     var showBaseCritRate: Boolean = false
@@ -176,6 +184,8 @@ object PanelConfig {
         val enableTeamIndicators: Boolean = true,
         val enableBattleInfoPanel: Boolean = true,
         val enableBattleLog: Boolean = true,
+        /** Null when absent from older config files; treated as true when loading. */
+        val enableBattleLogDamagePercentages: Boolean? = null,
         val enableMoveTooltips: Boolean = true,
         // Panel settings
         val panelX: Int? = null,
@@ -207,6 +217,8 @@ object PanelConfig {
         // Tooltip display options
         val showTeraType: Boolean = false,
         val showStatRanges: Boolean = true,
+        /** Null when absent from older config files; treated as true when loading. */
+        val showOpponentSpeedRange: Boolean? = null,
         val showBaseCritRate: Boolean = false
     )
 
@@ -218,6 +230,7 @@ object PanelConfig {
                 enableTeamIndicators = data.enableTeamIndicators
                 enableBattleInfoPanel = data.enableBattleInfoPanel
                 enableBattleLog = data.enableBattleLog
+                enableBattleLogDamagePercentages = data.enableBattleLogDamagePercentages ?: true
                 enableMoveTooltips = data.enableMoveTooltips
                 // Panel settings
                 panelX = data.panelX
@@ -253,8 +266,9 @@ object PanelConfig {
                 // Tooltip display options
                 showTeraType = data.showTeraType
                 showStatRanges = data.showStatRanges
+                showOpponentSpeedRange = data.showOpponentSpeedRange ?: true
                 showBaseCritRate = data.showBaseCritRate
-                CobblemonExtendedBattleUI.LOGGER.info("PanelConfig: Loaded config - features: team=$enableTeamIndicators, panel=$enableBattleInfoPanel, log=$enableBattleLog, moveTooltips=$enableMoveTooltips")
+                CobblemonExtendedBattleUI.LOGGER.info("PanelConfig: Loaded config - features: team=$enableTeamIndicators, panel=$enableBattleInfoPanel, log=$enableBattleLog, logDamagePct=$enableBattleLogDamagePercentages, moveTooltips=$enableMoveTooltips")
             }
         } catch (e: Exception) {
             CobblemonExtendedBattleUI.LOGGER.warn("PanelConfig: Failed to load config, using defaults: ${e.message}")
@@ -267,6 +281,7 @@ object PanelConfig {
                 enableTeamIndicators = enableTeamIndicators,
                 enableBattleInfoPanel = enableBattleInfoPanel,
                 enableBattleLog = enableBattleLog,
+                enableBattleLogDamagePercentages = enableBattleLogDamagePercentages,
                 enableMoveTooltips = enableMoveTooltips,
                 panelX = panelX,
                 panelY = panelY,
@@ -293,6 +308,7 @@ object PanelConfig {
                 moveTooltipFontScale = moveTooltipFontScale,
                 showTeraType = showTeraType,
                 showStatRanges = showStatRanges,
+                showOpponentSpeedRange = showOpponentSpeedRange,
                 showBaseCritRate = showBaseCritRate
             )
             configFile.parentFile?.mkdirs()
@@ -454,6 +470,10 @@ object PanelConfig {
         enableBattleLog = enabled
     }
 
+    fun setEnableBattleLogDamagePercentages(enabled: Boolean) {
+        enableBattleLogDamagePercentages = enabled
+    }
+
     fun setEnableMoveTooltips(enabled: Boolean) {
         enableMoveTooltips = enabled
     }
@@ -470,9 +490,47 @@ object PanelConfig {
         showStatRanges = show
     }
 
+    fun setShowOpponentSpeedRange(show: Boolean) {
+        showOpponentSpeedRange = show
+    }
+
     fun setShowBaseCritRate(show: Boolean) {
         showBaseCritRate = show
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // Server-synced effective values (local config when server does not override)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    val enableTeamIndicatorsEffective: Boolean
+        get() = ClientServerFeatureSync.getOverride("enableTeamIndicators") ?: enableTeamIndicators
+
+    val teamIndicatorRepositioningEnabledEffective: Boolean
+        get() = ClientServerFeatureSync.getOverride("teamIndicatorRepositioningEnabled") ?: teamIndicatorRepositioningEnabled
+
+    val enableBattleInfoPanelEffective: Boolean
+        get() = ClientServerFeatureSync.getOverride("enableBattleInfoPanel") ?: enableBattleInfoPanel
+
+    val enableBattleLogEffective: Boolean
+        get() = ClientServerFeatureSync.getOverride("enableBattleLog") ?: enableBattleLog
+
+    val enableBattleLogDamagePercentagesEffective: Boolean
+        get() = ClientServerFeatureSync.getOverride("enableBattleLogDamagePercentages") ?: enableBattleLogDamagePercentages
+
+    val enableMoveTooltipsEffective: Boolean
+        get() = ClientServerFeatureSync.getOverride("enableMoveTooltips") ?: enableMoveTooltips
+
+    val showTeraTypeEffective: Boolean
+        get() = ClientServerFeatureSync.getOverride("showTeraType") ?: showTeraType
+
+    val showStatRangesEffective: Boolean
+        get() = ClientServerFeatureSync.getOverride("showStatRanges") ?: showStatRanges
+
+    val showOpponentSpeedRangeEffective: Boolean
+        get() = ClientServerFeatureSync.getOverride("showOpponentSpeedRange") ?: showOpponentSpeedRange
+
+    val showBaseCritRateEffective: Boolean
+        get() = ClientServerFeatureSync.getOverride("showBaseCritRate") ?: showBaseCritRate
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Feature toggle helpers (for mixins to check tracking dependencies)
@@ -483,11 +541,13 @@ object PanelConfig {
      * Needed for both battle info panel (weather, terrain, conditions, stats)
      * and team indicator tooltips (stat changes, volatile statuses).
      */
-    fun needsBattleStateTracking(): Boolean = enableBattleInfoPanel || enableTeamIndicators
+    fun needsBattleStateTracking(): Boolean =
+        enableBattleInfoPanelEffective || enableTeamIndicatorsEffective
 
     /**
      * Returns true if DamageTracker should track HP changes.
-     * Only needed for battle log damage/healing percentages.
+     * Only used for optional battle log damage/healing percentage lines; requires custom battle log.
      */
-    fun needsDamageTracking(): Boolean = enableBattleLog
+    fun needsDamageTracking(): Boolean =
+        enableBattleLogEffective && enableBattleLogDamagePercentagesEffective
 }

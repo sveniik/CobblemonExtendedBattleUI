@@ -185,7 +185,7 @@ object PokemonInfoPopup {
         val vPad = UIUtils.CELL_VPAD_TOP + UIUtils.CELL_VPAD_BOTTOM
 
         // Header: name+level, types+hp, optional tera
-        val hasTera = !data.isTerastallized && PanelConfig.showTeraType && data.teraType != null
+        val hasTera = !data.isTerastallized && PanelConfig.showTeraTypeEffective && data.teraType != null
         val headerLines = if (hasTera) 3 else 2
         val headerCellH = vPad + headerLines * lineH
 
@@ -346,7 +346,7 @@ object PokemonInfoPopup {
         curY += lineH
 
         // Line 3 (optional): Tera type
-        if (!data.isTerastallized && PanelConfig.showTeraType && data.teraType != null) {
+        if (!data.isTerastallized && PanelConfig.showTeraTypeEffective && data.teraType != null) {
             val et = ElementalTypes.get(data.teraType.showdownId())
             val teraName = et?.displayName?.string ?: data.teraType.name
             val teraColor = et?.let { UIUtils.getTypeColor(it) } ?: TeamIndicatorUI.TOOLTIP_TEXT
@@ -394,7 +394,7 @@ object PokemonInfoPopup {
             val gap = tr.getWidth("  ") * fontScale
             when {
                 // Player Pokemon: show actual → effective for all stats
-                data.isPlayerPokemon && PanelConfig.showStatRanges -> {
+                data.isPlayerPokemon && PanelConfig.showStatRangesEffective -> {
                     val actualValue = getActualStat(data, stat)
                     if (actualValue != null) {
                         val effective = calculateEffectiveStat(actualValue, stat, stage, data)
@@ -422,9 +422,10 @@ object PokemonInfoPopup {
                         }
                     }
                 }
-                // Opponent Pokemon: show speed range inline
+                // Opponent Pokemon: optional speed range inline (label/stage always drawn above)
                 !data.isPlayerPokemon && stat == BattleStateTracker.BattleStat.SPEED
-                    && data.pokemonId != null && data.level != null -> {
+                    && data.pokemonId != null && data.level != null
+                    && PanelConfig.showOpponentSpeedRangeEffective -> {
                     val range = TeamIndicatorUI.calculateOpponentSpeedRange(
                         data.uuid, data.pokemonId, data.level, stage,
                         data.statusCondition, data.item, data.form

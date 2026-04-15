@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "enableTeamIndicators": true,
+  "sync_enableTeamIndicators": false,
+  "teamIndicatorRepositioningEnabled": true,
+  "sync_teamIndicatorRepositioningEnabled": false,
+  "enableBattleInfoPanel": true,
+  "sync_enableBattleInfoPanel": false,
+  "enableBattleLog": true,
+  "sync_enableBattleLog": false,
+  "enableBattleLogDamagePercentages": true,
+  "sync_enableBattleLogDamagePercentages": false,
+  "enableMoveTooltips": true,
+  "sync_enableMoveTooltips": false,
+  "showTeraType": false,
+  "sync_showTeraType": false,
+  "showStatRanges": true,
+  "sync_showStatRanges": false,
+  "showOpponentSpeedRange": true,
+  "sync_showOpponentSpeedRange": false,
+  "showBaseCritRate": false,
+  "sync_showBaseCritRate": false
+}

@@ -36,7 +36,7 @@ public class BattleMessageHandlerMixin {
         }
 
         // Store messages in battle log only if the battle log feature is enabled
-        if (PanelConfig.INSTANCE.getEnableBattleLog()) {
+        if (PanelConfig.INSTANCE.getEnableBattleLogEffective()) {
             BattleLog.INSTANCE.processMessages(packet.getMessages());
             // Also prevent Cobblemon from showing messages in chat (we show our own log)
             ci.cancel();

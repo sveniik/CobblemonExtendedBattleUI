@@ -32,7 +32,7 @@ public class BattleMoveSelectionMixin {
      */
     @Inject(method = "renderWidget", at = @At("HEAD"), remap = true)
     private void onRenderWidgetHead(DrawContext context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
-        if (PanelConfig.INSTANCE.getEnableMoveTooltips()) {
+        if (PanelConfig.INSTANCE.getEnableMoveTooltipsEffective()) {
             MoveTooltipRenderer.INSTANCE.clear();
         }
     }
@@ -43,7 +43,7 @@ public class BattleMoveSelectionMixin {
      */
     @Inject(method = "renderWidget", at = @At("RETURN"), remap = true)
     private void onRenderWidgetReturn(DrawContext context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
-        if (!PanelConfig.INSTANCE.getEnableMoveTooltips()) {
+        if (!PanelConfig.INSTANCE.getEnableMoveTooltipsEffective()) {
             return;
         }
 

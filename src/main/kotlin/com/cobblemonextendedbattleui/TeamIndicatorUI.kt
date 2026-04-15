@@ -819,7 +819,7 @@ object TeamIndicatorUI {
         val isAltDown = GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_LEFT_ALT) == GLFW.GLFW_PRESS ||
             GLFW.glfwGetKey(handle, GLFW.GLFW_KEY_RIGHT_ALT) == GLFW.GLFW_PRESS
 
-        val repositioningEnabled = PanelConfig.teamIndicatorRepositioningEnabled
+        val repositioningEnabled = PanelConfig.teamIndicatorRepositioningEnabledEffective
 
         // Handle drag in progress (only if repositioning is enabled)
         if (isDragging && repositioningEnabled) {
@@ -1416,7 +1416,7 @@ object TeamIndicatorUI {
         TeamPanelRenderer.renderControlHints(
             context, bounds, isLeftSide,
             !isInDefaultState(isLeftSide),
-            PanelConfig.teamIndicatorRepositioningEnabled,
+            PanelConfig.teamIndicatorRepositioningEnabledEffective,
             ::applyOpacity
         )
     }

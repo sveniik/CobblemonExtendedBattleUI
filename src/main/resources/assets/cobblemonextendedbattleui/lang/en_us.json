@@ -18,7 +18,10 @@
   "cobblemonextendedbattleui.config.enableBattleInfoPanel.tooltip": "Show panel with weather, terrain, field conditions, and stat stages",
 
   "cobblemonextendedbattleui.config.enableBattleLog": "Battle Log",
-  "cobblemonextendedbattleui.config.enableBattleLog.tooltip": "Show custom battle log widget with damage percentages",
+  "cobblemonextendedbattleui.config.enableBattleLog.tooltip": "Show the custom on-screen battle log instead of Cobblemon's chat-based battle messages. Optional damage and healing percentage lines are configured below.",
+
+  "cobblemonextendedbattleui.config.enableBattleLogDamagePercentages": "Damage Percentages",
+  "cobblemonextendedbattleui.config.enableBattleLogDamagePercentages.tooltip": "When Battle Log is enabled, add extra lines showing damage and healing as a percentage of max HP. Requires Battle Log (above) to be enabled; this option is disabled while Battle Log is off.",
 
   "cobblemonextendedbattleui.config.enableMoveTooltips": "Move Tooltips",
   "cobblemonextendedbattleui.config.enableMoveTooltips.tooltip": "Show tooltips with type effectiveness when hovering over moves. Disable if using Cobblemon Move Inspector.",
@@ -27,7 +30,10 @@
   "cobblemonextendedbattleui.config.showTeraType.tooltip": "Display Tera Type in Pokemon tooltips when known",
 
   "cobblemonextendedbattleui.config.showStatRanges": "Show Stat Values",
-  "cobblemonextendedbattleui.config.showStatRanges.tooltip": "Display Attack, Defense, Sp. Atk, and Sp. Def in Pokemon tooltips (Speed is always shown)",
+  "cobblemonextendedbattleui.config.showStatRanges.tooltip": "Display stat values for your Pokemon in tooltips (Attack, Defense, Sp. Atk, Sp. Def, Speed). Independent of opponent speed range below.",
+
+  "cobblemonextendedbattleui.config.showOpponentSpeedRange": "Opponent Speed Range",
+  "cobblemonextendedbattleui.config.showOpponentSpeedRange.tooltip": "Show estimated min–max Speed next to the Speed row for opponent Pokemon. The Speed label and stage are always shown; only the range numbers are hidden when this is off. Independent of Show Stat Values.",
 
   "cobblemonextendedbattleui.config.showBaseCritRate": "Show Base Crit Rate",
   "cobblemonextendedbattleui.config.showBaseCritRate.tooltip": "Always show crit rate in move tooltips. When disabled, only shows crit rate for high-crit moves or when boosted by items/abilities.",

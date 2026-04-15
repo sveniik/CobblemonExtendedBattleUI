@@ -23,6 +23,7 @@ data class FeatureSyncS2CPayload(
         )
 
         const val SCHEMA_VERSION: Int = 1
+        private const val MAX_FEATURE_SYNC_ENTRIES: Int = 64
 
         val CODEC: PacketCodec<RegistryByteBuf, FeatureSyncS2CPayload> = CustomPayload.codecOf(
             { payload, buf ->
@@ -35,7 +36,7 @@ data class FeatureSyncS2CPayload(
             },
             { buf ->
                 val version = buf.readVarInt()
-                val n = buf.readVarInt()
+                val n = buf.readVarInt().coerceIn(0, MAX_FEATURE_SYNC_ENTRIES)
                 val list = ArrayList<Pair<String, Boolean>>(n)
                 repeat(n) {
                     list.add(buf.readString() to buf.readBoolean())

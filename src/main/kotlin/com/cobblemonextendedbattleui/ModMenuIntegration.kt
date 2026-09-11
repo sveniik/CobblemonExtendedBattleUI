@@ -3,6 +3,7 @@ package com.cobblemonextendedbattleui
 import com.terraformersmc.modmenu.api.ConfigScreenFactory
 import com.terraformersmc.modmenu.api.ModMenuApi
 import me.shedaniel.clothconfig2.api.ConfigBuilder
+import me.shedaniel.clothconfig2.api.Requirement
 import net.minecraft.client.gui.screen.Screen
 import net.minecraft.text.Text
 
@@ -61,15 +62,25 @@ class ModMenuIntegration : ModMenuApi {
                 .build()
         )
 
-        // Battle Log toggle
+        val battleLogEntry = entryBuilder.startBooleanToggle(
+            Text.translatable("cobblemonextendedbattleui.config.enableBattleLog"),
+            PanelConfig.enableBattleLog
+        )
+            .setDefaultValue(true)
+            .setTooltip(Text.translatable("cobblemonextendedbattleui.config.enableBattleLog.tooltip"))
+            .setSaveConsumer { value -> PanelConfig.setEnableBattleLog(value) }
+            .build()
+        general.addEntry(battleLogEntry)
+
         general.addEntry(
             entryBuilder.startBooleanToggle(
-                Text.translatable("cobblemonextendedbattleui.config.enableBattleLog"),
-                PanelConfig.enableBattleLog
+                Text.translatable("cobblemonextendedbattleui.config.enableBattleLogDamagePercentages"),
+                PanelConfig.enableBattleLogDamagePercentages
             )
                 .setDefaultValue(true)
-                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.enableBattleLog.tooltip"))
-                .setSaveConsumer { value -> PanelConfig.setEnableBattleLog(value) }
+                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.enableBattleLogDamagePercentages.tooltip"))
+                .setSaveConsumer { value -> PanelConfig.setEnableBattleLogDamagePercentages(value) }
+                .setRequirement(Requirement.isTrue(battleLogEntry))
                 .build()
         )
 
@@ -110,6 +121,17 @@ class ModMenuIntegration : ModMenuApi {
                 .setDefaultValue(true)
                 .setTooltip(Text.translatable("cobblemonextendedbattleui.config.showStatRanges.tooltip"))
                 .setSaveConsumer { value -> PanelConfig.setShowStatRanges(value) }
+                .build()
+        )
+
+        tooltipOptions.addEntry(
+            entryBuilder.startBooleanToggle(
+                Text.translatable("cobblemonextendedbattleui.config.showOpponentSpeedRange"),
+                PanelConfig.showOpponentSpeedRange
+            )
+                .setDefaultValue(true)
+                .setTooltip(Text.translatable("cobblemonextendedbattleui.config.showOpponentSpeedRange.tooltip"))
+                .setSaveConsumer { value -> PanelConfig.setShowOpponentSpeedRange(value) }
                 .build()
         )
 

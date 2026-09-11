@@ -34,25 +34,25 @@ public abstract class MouseScrollMixin {
         // Only intercept during battle
         if (CobblemonClient.INSTANCE.getBattle() != null) {
             // Let the move tooltip try to handle the scroll first (highest priority when in Fight menu)
-            if (PanelConfig.INSTANCE.getEnableMoveTooltips() &&
+            if (PanelConfig.INSTANCE.getEnableMoveTooltipsEffective() &&
                 MoveTooltipRenderer.INSTANCE.handleScroll(vertical)) {
                 ci.cancel();
                 return;
             }
             // Then let the team indicator tooltip try
-            if (PanelConfig.INSTANCE.getEnableTeamIndicators() &&
+            if (PanelConfig.INSTANCE.getEnableTeamIndicatorsEffective() &&
                 TeamIndicatorUI.INSTANCE.handleScroll(vertical)) {
                 ci.cancel();
                 return;
             }
             // Then let the battle log widget try
-            if (PanelConfig.INSTANCE.getEnableBattleLog() &&
+            if (PanelConfig.INSTANCE.getEnableBattleLogEffective() &&
                 BattleLogWidget.INSTANCE.onScroll(this.x, this.y, vertical)) {
                 ci.cancel();
                 return;
             }
             // Finally try the info panel
-            if (PanelConfig.INSTANCE.getEnableBattleInfoPanel() &&
+            if (PanelConfig.INSTANCE.getEnableBattleInfoPanelEffective() &&
                 BattleInfoPanel.INSTANCE.onScroll(this.x, this.y, vertical)) {
                 ci.cancel();
             }

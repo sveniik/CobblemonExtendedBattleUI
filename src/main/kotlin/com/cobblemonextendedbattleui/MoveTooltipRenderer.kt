@@ -125,7 +125,7 @@ object MoveTooltipRenderer {
 
     fun renderTooltip(context: DrawContext) {
         val move = hoveredMove ?: return
-        if (!PanelConfig.enableMoveTooltips) return
+        if (!PanelConfig.enableMoveTooltipsEffective) return
 
         val mc = MinecraftClient.getInstance()
         val screenWidth = mc.window.scaledWidth
@@ -369,7 +369,7 @@ object MoveTooltipRenderer {
             var critBonus = 0
             if (hasSuperLuck) critBonus++
             if (hasCritItem) critBonus++
-            val shouldShowCrit = PanelConfig.showBaseCritRate || baseCritRatio > 1.0 || critBonus > 0
+            val shouldShowCrit = PanelConfig.showBaseCritRateEffective || baseCritRatio > 1.0 || critBonus > 0
             if (shouldShowCrit) {
                 val basePct = critRatioToPercent(baseCritRatio)
                 if (critBonus > 0) {

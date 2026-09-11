@@ -26,18 +26,18 @@ object BattleInfoRenderer {
             }
         }
 
-        if (PanelConfig.enableTeamIndicators) {
+        if (PanelConfig.enableTeamIndicatorsEffective) {
             TeamIndicatorUI.render(context)
         }
-        if (PanelConfig.enableBattleInfoPanel) {
+        if (PanelConfig.enableBattleInfoPanelEffective) {
             BattleInfoPanel.render(context)
         }
-        if (PanelConfig.enableBattleLog) {
+        if (PanelConfig.enableBattleLogEffective) {
             BattleLogWidget.render(context)
         }
 
         // Tooltip renders LAST to appear on top of everything
-        if (PanelConfig.enableTeamIndicators) {
+        if (PanelConfig.enableTeamIndicatorsEffective) {
             TeamIndicatorUI.renderHoverTooltip(context)
         }
     }

@@ -38,7 +38,7 @@ public class BattleHealthChangeHandlerMixin {
         // Skip entirely if no features need HP tracking
         boolean needsDamage = PanelConfig.INSTANCE.needsDamageTracking();
         boolean needsKOTracking = PanelConfig.INSTANCE.needsBattleStateTracking() ||
-                                   PanelConfig.INSTANCE.getEnableTeamIndicators();
+                                   PanelConfig.INSTANCE.getEnableTeamIndicatorsEffective();
         if (!needsDamage && !needsKOTracking) return;
 
         ClientBattle battle = CobblemonClient.INSTANCE.getBattle();
@@ -88,7 +88,7 @@ public class BattleHealthChangeHandlerMixin {
 
                 // Track KO at the moment HP reaches 0 (only if needed by enabled features)
                 if (newPercent <= 0 && needsKOTracking) {
-                    if (PanelConfig.INSTANCE.getEnableTeamIndicators()) {
+                    if (PanelConfig.INSTANCE.getEnableTeamIndicatorsEffective()) {
                         TeamIndicatorUI.INSTANCE.markPokemonAsKO(uuid);
                     }
                     if (PanelConfig.INSTANCE.needsBattleStateTracking()) {

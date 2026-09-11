@@ -315,6 +315,20 @@ object BattleStateTracker {
     fun getTeraType(uuid: UUID): String? = ConditionTracker.getTeraType(uuid)
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Alpha Boost (delegates to ConditionTracker)
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    fun markAlphaBoosted(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = PokemonRegistry.resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for alpha boost")
+            return
+        }
+        ConditionTracker.markAlphaBoosted(uuid)
+    }
+
+    fun isAlphaBoosted(uuid: UUID): Boolean = ConditionTracker.isAlphaBoosted(uuid)
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Volatile Statuses (delegates to VolatileStatusTracker)
     // ═══════════════════════════════════════════════════════════════════════════
 

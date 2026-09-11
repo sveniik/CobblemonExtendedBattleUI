@@ -30,6 +30,9 @@ object ConditionTracker {
     // Terastallization tracking
     private val terastallizedPokemon = ConcurrentHashMap<java.util.UUID, String>()
 
+    // Alpha boost tracking (Cobblemon 1.8 wildalpha rule)
+    private val alphaBoostedPokemon = java.util.concurrent.ConcurrentHashMap.newKeySet<java.util.UUID>()
+
     fun clear() {
         weather = null
         terrain = null
@@ -37,6 +40,7 @@ object ConditionTracker {
         playerSideConditions.clear()
         opponentSideConditions.clear()
         terastallizedPokemon.clear()
+        alphaBoostedPokemon.clear()
     }
 
     // ── Weather ──────────────────────────────────────────────────────────────
@@ -206,6 +210,15 @@ object ConditionTracker {
     fun isTerastallized(uuid: java.util.UUID): Boolean = terastallizedPokemon.containsKey(uuid)
 
     fun getTeraType(uuid: java.util.UUID): String? = terastallizedPokemon[uuid]
+
+    // ── Alpha Boost ──────────────────────────────────────────────────────────
+
+    fun markAlphaBoosted(uuid: java.util.UUID) {
+        alphaBoostedPokemon.add(uuid)
+        CobblemonExtendedBattleUI.LOGGER.debug("ConditionTracker: $uuid received an alpha boost")
+    }
+
+    fun isAlphaBoosted(uuid: java.util.UUID): Boolean = alphaBoostedPokemon.contains(uuid)
 
     // ── Expiration Check ─────────────────────────────────────────────────────
 

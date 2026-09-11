@@ -342,6 +342,13 @@ object TranslationKeys {
     const val DYNAMAX_KEY = "cobblemon.battle.start.dynamax"
     const val GIGANTAMAX_KEY = "cobblemon.battle.start.gmax"
 
+    /**
+     * Emitted by Cobblemon 1.8's `wildalpha` ruleset when an alpha Pokemon switches in.
+     * The ruleset grants floor(level / 10) + 1 hidden stat-stage points spread randomly
+     * across atk/def/spa/spd/spe; the distribution is never sent to the client.
+     */
+    const val ALPHA_BOOST_KEY = "cobblemon.battle.start.alphaboost"
+
     // ═════════════════════════════════════════════════════════════════════════
     // Type Modification Move Keys
     // ═════════════════════════════════════════════════════════════════════════

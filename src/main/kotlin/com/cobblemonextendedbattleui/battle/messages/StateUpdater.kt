@@ -177,6 +177,13 @@ object StateUpdater {
         BattleStateTracker.markItemSwapped(userName)
     }
 
+    fun extractAbilitySwap(args: Array<out Any>) {
+        if (args.isEmpty()) return
+        val userName = MessageParser.argToString(args[0])
+        CobblemonExtendedBattleUI.LOGGER.debug("StateUpdater: $userName swapped abilities")
+        BattleStateTracker.clearRevealedAbilityByName(userName)
+    }
+
     fun extractLifeOrbReveal(args: Array<out Any>) {
         if (args.isEmpty()) return
         val pokemonName = MessageParser.argToString(args[0])

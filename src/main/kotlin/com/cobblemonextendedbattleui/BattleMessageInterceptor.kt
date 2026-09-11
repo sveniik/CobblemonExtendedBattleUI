@@ -257,6 +257,20 @@ object BattleMessageInterceptor {
             // Volatile Statuses
             // ═══════════════════════════════════════════════════════════════════
 
+            // Alpha boost (Cobblemon 1.8): grants hidden stat stages, so the exact
+            // values stay unknown to the client. Track it so speed estimates widen.
+            // Wandering Spirit swaps abilities, so any ability we revealed is now stale.
+            if (key == TranslationKeys.ABILITY_SWAP_KEY && args.isNotEmpty()) {
+                StateUpdater.extractAbilitySwap(args)
+                return
+            }
+
+            if (key == TranslationKeys.ALPHA_BOOST_KEY && args.isNotEmpty()) {
+                val pokemonName = MessageParser.argToString(args[0])
+                BattleStateTracker.markAlphaBoosted(pokemonName, preferAlly = false)
+                return
+            }
+
             TranslationKeys.VOLATILE_START_KEYS[key]?.let { volatileStatus ->
                 StateUpdater.extractVolatileStatusStart(args, volatileStatus)
                 return

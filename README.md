@@ -119,10 +119,10 @@ If you've created a translation, [open an issue](https://github.com/sveniik/Cobb
 ## Requirements
 
 - Minecraft 1.21.1
-- Fabric Loader 0.16.0+
+- Fabric Loader 0.17.2+ (required by Cobblemon 1.8)
 - Fabric API
 - Fabric Language Kotlin
-- Cobblemon 1.7.0+
+- Cobblemon 1.7.0+ (tested against 1.8.0)
 
 ## Known Issues
 There is a known incompatability with the current version of [Cobblemon UI Tweaks](https://modrinth.com/mod/cobblemon-ui-tweaks).

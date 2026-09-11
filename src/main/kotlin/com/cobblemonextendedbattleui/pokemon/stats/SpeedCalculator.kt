@@ -174,8 +174,20 @@ object SpeedCalculator {
             1.0
         }
 
+        // Cobblemon 1.8 alpha boost: the `wildalpha` ruleset hands the wild Pokemon
+        // floor(level / 10) + 1 stat-stage points, spread randomly across
+        // atk/def/spa/spd/spe and capped at +6 per stat. Showdown applies them with the
+        // same multiplier table as regular stages, but never tells the client how they
+        // were distributed - so speed may have received anything from 0 to all of them.
+        // Only the upper bound moves; the minimum stays as-is.
+        val alphaMaxMultiplier = if (BattleStateTracker.isAlphaBoosted(uuid)) {
+            StatCalculator.getStageMultiplier(minOf(level / 10 + 1, 6))
+        } else {
+            1.0
+        }
+
         val maxSpeed =
-            (maxBaseStat * stageMultiplier * maxAbilityMultiplier.coerceAtLeast(1.0) * maxStatusMultiplier * itemMultiplier).toInt()
+            (maxBaseStat * stageMultiplier * maxAbilityMultiplier.coerceAtLeast(1.0) * maxStatusMultiplier * itemMultiplier * alphaMaxMultiplier).toInt()
 
         val abilityNote = if (revealedAbility != null) {
             if (maxAbilityMultiplier > 1.0) {

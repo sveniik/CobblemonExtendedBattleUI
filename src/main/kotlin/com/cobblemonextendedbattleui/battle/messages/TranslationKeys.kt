@@ -278,6 +278,13 @@ object TranslationKeys {
         put("cobblemon.battle.sidestart.opponent.spikes", SideCondition.SPIKES to false)
         put("cobblemon.battle.sidestart.opponent.toxicspikes", SideCondition.TOXIC_SPIKES to false)
         put("cobblemon.battle.sidestart.opponent.stickyweb", SideCondition.STICKY_WEB to false)
+        // Pledge combo side conditions (Cobblemon 1.8 fixed their Showdown handling)
+        put("cobblemon.battle.sidestart.ally.firepledge", SideCondition.FIRE_PLEDGE to true)
+        put("cobblemon.battle.sidestart.ally.grasspledge", SideCondition.GRASS_PLEDGE to true)
+        put("cobblemon.battle.sidestart.ally.waterpledge", SideCondition.WATER_PLEDGE to true)
+        put("cobblemon.battle.sidestart.opponent.firepledge", SideCondition.FIRE_PLEDGE to false)
+        put("cobblemon.battle.sidestart.opponent.grasspledge", SideCondition.GRASS_PLEDGE to false)
+        put("cobblemon.battle.sidestart.opponent.waterpledge", SideCondition.WATER_PLEDGE to false)
     }
 
     val SIDE_END_KEYS = buildMap {
@@ -303,6 +310,13 @@ object TranslationKeys {
         put("cobblemon.battle.sideend.opponent.spikes", SideCondition.SPIKES to false)
         put("cobblemon.battle.sideend.opponent.toxicspikes", SideCondition.TOXIC_SPIKES to false)
         put("cobblemon.battle.sideend.opponent.stickyweb", SideCondition.STICKY_WEB to false)
+        // Pledge combo side conditions (Cobblemon 1.8 fixed their Showdown handling)
+        put("cobblemon.battle.sideend.ally.firepledge", SideCondition.FIRE_PLEDGE to true)
+        put("cobblemon.battle.sideend.ally.grasspledge", SideCondition.GRASS_PLEDGE to true)
+        put("cobblemon.battle.sideend.ally.waterpledge", SideCondition.WATER_PLEDGE to true)
+        put("cobblemon.battle.sideend.opponent.firepledge", SideCondition.FIRE_PLEDGE to false)
+        put("cobblemon.battle.sideend.opponent.grasspledge", SideCondition.GRASS_PLEDGE to false)
+        put("cobblemon.battle.sideend.opponent.waterpledge", SideCondition.WATER_PLEDGE to false)
     }
 
     // ═════════════════════════════════════════════════════════════════════════
@@ -341,6 +355,19 @@ object TranslationKeys {
 
     const val DYNAMAX_KEY = "cobblemon.battle.start.dynamax"
     const val GIGANTAMAX_KEY = "cobblemon.battle.start.gmax"
+
+    /**
+     * Emitted by Cobblemon 1.8's `wildalpha` ruleset when an alpha Pokemon switches in.
+     * The ruleset grants floor(level / 10) + 1 hidden stat-stage points spread randomly
+     * across atk/def/spa/spd/spe; the distribution is never sent to the client.
+     */
+    const val ALPHA_BOOST_KEY = "cobblemon.battle.start.alphaboost"
+
+    /**
+     * Wandering Spirit swaps the holder's ability with the attacker's, which makes any
+     * previously revealed ability stale. Newly localised in Cobblemon 1.8.
+     */
+    const val ABILITY_SWAP_KEY = "cobblemon.battle.activate.wanderingspirit"
 
     // ═════════════════════════════════════════════════════════════════════════
     // Type Modification Move Keys

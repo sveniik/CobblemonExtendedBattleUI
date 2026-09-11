@@ -106,7 +106,10 @@ object BattleStateTracker {
         STEALTH_ROCK("cobblemonextendedbattleui.side.stealth_rock", "🪨", null),
         SPIKES("cobblemonextendedbattleui.side.spikes", "📌", null, 3),
         TOXIC_SPIKES("cobblemonextendedbattleui.side.toxic_spikes", "☠", null, 2),
-        STICKY_WEB("cobblemonextendedbattleui.side.sticky_web", "🕸", null);
+        STICKY_WEB("cobblemonextendedbattleui.side.sticky_web", "🕸", null),
+        FIRE_PLEDGE("cobblemonextendedbattleui.side.fire_pledge", "🔥", 4),
+        GRASS_PLEDGE("cobblemonextendedbattleui.side.grass_pledge", "🌿", 4),
+        WATER_PLEDGE("cobblemonextendedbattleui.side.water_pledge", "🌈", 4);
 
         val displayName: String get() = Text.translatable(translationKey).string
     }
@@ -379,6 +382,10 @@ object BattleStateTracker {
     fun getRevealedAbility(uuid: UUID): String? = AbilityItemTracker.getRevealedAbility(uuid)
     fun getRevealedAbilityByName(pokemonName: String, preferAlly: Boolean? = null): String? = AbilityItemTracker.getRevealedAbilityByName(pokemonName, preferAlly)
     fun clearRevealedAbility(uuid: UUID) = AbilityItemTracker.clearRevealedAbility(uuid)
+    fun clearRevealedAbilityByName(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = PokemonRegistry.resolvePokemonUuid(pokemonName, preferAlly) ?: return
+        AbilityItemTracker.clearRevealedAbility(uuid)
+    }
 
     fun setItem(pokemonName: String, itemName: String, status: ItemStatus, preferAlly: Boolean? = null) = AbilityItemTracker.setItem(pokemonName, itemName, status, currentTurn, preferAlly)
     fun getItem(uuid: UUID): TrackedItem? = AbilityItemTracker.getItem(uuid)

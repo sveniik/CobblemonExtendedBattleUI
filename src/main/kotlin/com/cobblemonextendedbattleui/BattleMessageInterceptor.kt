@@ -253,6 +253,14 @@ object BattleMessageInterceptor {
                 CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: $pokemonName Terastallized into $teraType type")
             }
 
+            // Alpha boost (Cobblemon 1.8): hidden stat stages, so we only learn that they exist
+            if (key == TranslationKeys.ALPHA_BOOST_KEY && args.isNotEmpty()) {
+                val pokemonName = MessageParser.argToString(args[0])
+                BattleStateTracker.markAlphaBoosted(pokemonName, preferAlly = false)
+                CobblemonExtendedBattleUI.LOGGER.debug("BattleMessageInterceptor: $pokemonName received an alpha boost")
+                return
+            }
+
             // ═══════════════════════════════════════════════════════════════════
             // Volatile Statuses
             // ═══════════════════════════════════════════════════════════════════

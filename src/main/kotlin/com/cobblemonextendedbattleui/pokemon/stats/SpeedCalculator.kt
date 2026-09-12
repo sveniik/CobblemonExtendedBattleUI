@@ -25,6 +25,12 @@ object SpeedCalculator {
         val itemNote: String? = null
     )
 
+    /** Showdown caps each stat's alpha boost at +6. */
+    private const val MAX_ALPHA_STAGE = 6
+
+    /** EV cap for a single stat, the worst case assumed for trainer and PvP opponents. */
+    private const val MAX_EVS_PER_STAT = 252
+
     // ═════════════════════════════════════════════════════════════════════════
     // Speed Modifier Constants
     // ═════════════════════════════════════════════════════════════════════════
@@ -144,8 +150,13 @@ object SpeedCalculator {
         val hasStatus = status != null
         val itemConsumed = knownItem?.status != BattleStateTracker.ItemStatus.HELD
 
+        // An alpha boost only happens in wild battles, and wild Pokemon are generated with no EVs,
+        // so a boosted opponent cannot have the 252 EVs assumed for trainer and PvP opponents.
+        val isAlphaBoosted = BattleStateTracker.isAlphaBoosted(uuid)
+        val maxEvs = if (isAlphaBoosted) 0 else MAX_EVS_PER_STAT
+
         val minBaseStat = StatCalculator.calculateStat(baseSpeed, level, 0, 0, 0.9)
-        val maxBaseStat = StatCalculator.calculateStat(baseSpeed, level, 31, 252, 1.1)
+        val maxBaseStat = StatCalculator.calculateStat(baseSpeed, level, 31, maxEvs, 1.1)
 
         val stageMultiplier = StatCalculator.getStageMultiplier(speedStage)
         val statusMultiplier = getStatusSpeedMultiplier(status, null)
@@ -153,7 +164,17 @@ object SpeedCalculator {
         val itemName = if (!itemConsumed) knownItem?.name else null
         val itemMultiplier = if (itemName != null) StatCalculator.getItemSpeedMultiplier(itemName) else 1.0
 
-        val minSpeed = (minBaseStat * stageMultiplier * statusMultiplier * itemMultiplier).toInt()
+        // Cobblemon 1.8 alpha boost. Showdown rolls floor(level / 10) + 1 points across the five
+        // stats, dropping a stat from the pool once it reaches +6, then applies them to speed as a
+        // separate multiplier before regular stages. We never learn the  roll, so speed gets a
+        // guaranteed floor only once the other four stats are saturated.
+        val alphaPoints = if (isAlphaBoosted) level / 10 + 1 else 0
+        val alphaMinStage = (alphaPoints - 4 * MAX_ALPHA_STAGE).coerceIn(0, MAX_ALPHA_STAGE)
+        val alphaMaxStage = alphaPoints.coerceIn(0, MAX_ALPHA_STAGE)
+        val alphaMinMultiplier = StatCalculator.getStageMultiplier(alphaMinStage)
+        val alphaMaxMultiplier = StatCalculator.getStageMultiplier(alphaMaxStage)
+
+        val minSpeed = (minBaseStat * alphaMinMultiplier * stageMultiplier * statusMultiplier * itemMultiplier).toInt()
 
         val revealedAbility = BattleStateTracker.getRevealedAbility(uuid)
 
@@ -175,7 +196,7 @@ object SpeedCalculator {
         }
 
         val maxSpeed =
-            (maxBaseStat * stageMultiplier * maxAbilityMultiplier.coerceAtLeast(1.0) * maxStatusMultiplier * itemMultiplier).toInt()
+            (maxBaseStat * alphaMaxMultiplier * stageMultiplier * maxAbilityMultiplier.coerceAtLeast(1.0) * maxStatusMultiplier * itemMultiplier).toInt()
 
         val abilityNote = if (revealedAbility != null) {
             if (maxAbilityMultiplier > 1.0) {

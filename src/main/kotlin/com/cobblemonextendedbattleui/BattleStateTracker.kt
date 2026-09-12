@@ -311,6 +311,16 @@ object BattleStateTracker {
         setTerastallized(uuid, teraTypeName)
     }
     fun setTerastallized(uuid: UUID, teraTypeName: String) = ConditionTracker.setTerastallized(uuid, teraTypeName)
+    fun markAlphaBoosted(pokemonName: String, preferAlly: Boolean? = null) {
+        val uuid = PokemonRegistry.resolvePokemonUuid(pokemonName, preferAlly) ?: run {
+            CobblemonExtendedBattleUI.LOGGER.debug("BattleStateTracker: Unknown Pokemon '$pokemonName' for alpha boost")
+            return
+        }
+        ConditionTracker.markAlphaBoosted(uuid)
+    }
+
+    fun isAlphaBoosted(uuid: UUID): Boolean = ConditionTracker.isAlphaBoosted(uuid)
+
     fun isTerastallized(uuid: UUID): Boolean = ConditionTracker.isTerastallized(uuid)
     fun getTeraType(uuid: UUID): String? = ConditionTracker.getTeraType(uuid)
 

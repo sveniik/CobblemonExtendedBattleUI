@@ -339,6 +339,14 @@ object TranslationKeys {
         "cobblemon.battle.formechange.minior" to "Core"
     )
 
+    /**
+     * Cobblemon 1.8's "Wild Alpha" battle rule gives the opposing lead an `alphaboost` volatile on
+     * switch-in. That volatile rolls floor(level / 10) + 1 points randomly across atk/def/spa/spd/spe,
+     * capping each at +6, and applies them with the standard stage multiplier table. The roll is never
+     * sent to the client, so this message is the only evidence the panel gets that the boost happened.
+     */
+    const val ALPHA_BOOST_KEY = "cobblemon.battle.start.alphaboost"
+
     const val DYNAMAX_KEY = "cobblemon.battle.start.dynamax"
     const val GIGANTAMAX_KEY = "cobblemon.battle.start.gmax"
 

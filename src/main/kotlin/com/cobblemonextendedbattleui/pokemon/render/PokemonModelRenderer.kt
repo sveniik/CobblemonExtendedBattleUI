@@ -25,6 +25,10 @@ object PokemonModelRenderer {
     // Fallback pokeball settings
     private const val BALL_SIZE = 10
 
+    // Model rendering runs every frame for every team slot, so an API mismatch is
+    // reported once per session instead of once per draw.
+    private var loggedLinkageError = false
+
     // Pokeball colors
     private val COLOR_NORMAL_TOP = color(255, 80, 80)
     private val COLOR_NORMAL_BOTTOM = color(240, 240, 240)
@@ -157,6 +161,18 @@ object PokemonModelRenderer {
             }
         } catch (e: Exception) {
             CobblemonExtendedBattleUI.LOGGER.debug("Failed to render Pokemon model: ${e.message}")
+            matrixStack.pop()
+            drawPokeballFallback(context, x, y, modelSize, isKO, status, applyOpacity, teamIndicatorScale)
+            return
+        } catch (e: LinkageError) {
+            // Errors aren't Exceptions, so without this the whole client crashes over a cosmetic render.
+            if (!loggedLinkageError) {
+                loggedLinkageError = true
+                CobblemonExtendedBattleUI.LOGGER.warn(
+                    "Cobblemon API mismatch while rendering a Pokemon model, showing pokeballs instead " +
+                        "for the rest of this session. Check for a mod update. $e"
+                )
+            }
             matrixStack.pop()
             drawPokeballFallback(context, x, y, modelSize, isKO, status, applyOpacity, teamIndicatorScale)
             return
